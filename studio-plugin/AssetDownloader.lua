@@ -16,6 +16,8 @@ local SoundService = game:GetService("SoundService")
 local Players = game:GetService("Players")
 
 local SERVER = "http://127.0.0.1:8765"
+-- Webseiten können diesen Header nicht mitschicken, so nimmt der Server nur Anfragen vom Plugin an.
+local PLUGIN_HEADERS = { ["X-Asset-Downloader"] = "plugin" }
 
 local BG = Color3.fromRGB(20, 21, 26)
 local CARD = Color3.fromRGB(30, 32, 40)
@@ -564,7 +566,7 @@ local function load(q)
 	status.TextColor3, status.Text = MUTED, "Lade … Hängt es? Plugins > Plugins verwalten > Asset Downloader: HTTP-Zugriff auf 127.0.0.1 erlauben."
 	savedLabel.Text, row.Visible, row2.Visible, uploadBtn.Visible = "", false, false, false
 	local url = ("%s/api/plugin?q=%s&place=%s"):format(SERVER, HttpService:UrlEncode(q), HttpService:UrlEncode(placeBox.Text))
-	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "GET" })
+	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="GET" })
 	loadBtn.Active, loadBtn.Text = true, "Laden"
 	if not ok then
 		status.TextColor3, status.Text = BAD, "Server nicht erreichbar. start.bat starten und HTTP-Zugriff fürs Plugin erlauben."
@@ -786,7 +788,7 @@ end
 local function save(ids, folder, btn, idleText)
 	btn.Active, btn.Text = false, "Speichere …"
 	local url = ("%s/api/plugin-save?place=%s&folder=%s"):format(SERVER, HttpService:UrlEncode(placeBox.Text), HttpService:UrlEncode(folder))
-	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "POST", Body = table.concat(ids, "\n") })
+	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="POST", Body = table.concat(ids, "\n") })
 	btn.Active, btn.Text = true, idleText
 	if not ok or not res.Success then
 		status.TextColor3, status.Text = BAD, "Speichern fehlgeschlagen. Läuft start.bat?"
@@ -833,7 +835,7 @@ end
 local function reupload(id)
 	local url = ("%s/api/plugin-upload?q=%s&user=%d&place=%s"):format(SERVER, id,
 		game:GetService("StudioService"):GetUserId(), HttpService:UrlEncode(placeBox.Text))
-	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "GET" })
+	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="GET" })
 	if not ok then return nil, "Server nicht erreichbar oder Zeitüberschreitung" end
 	local okJson, body = pcall(HttpService.JSONDecode, HttpService, res.Body)
 	if not res.Success then return nil, okJson and body.error or ("HTTP " .. res.StatusCode) end
@@ -875,7 +877,7 @@ end
 local function store(folder, file, bytes)
 	local hex = bytes:gsub(".", function(c) return string.format("%02x", c:byte()) end)
 	local url = ("%s/api/plugin-store?folder=%s&file=%s"):format(SERVER, HttpService:UrlEncode(folder), HttpService:UrlEncode(file))
-	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "POST", Body = hex })
+	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="POST", Body = hex })
 	return ok and res.Success
 end
 
@@ -918,7 +920,7 @@ local function loadBulk()
 	if text:match("^%s*$") or not bulkBtn.Active then return end
 	bulkBtn.Active, bulkBtn.Text = false, "Lade Liste …"
 	local url = ("%s/api/plugin-bulk?place=%s"):format(SERVER, HttpService:UrlEncode(placeBox.Text))
-	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "POST", Body = text })
+	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="POST", Body = text })
 	bulkBtn.Active, bulkBtn.Text = true, "Liste laden"
 	if not ok or not res.Success then
 		local okJson, body = pcall(HttpService.JSONDecode, HttpService, ok and res.Body or "")

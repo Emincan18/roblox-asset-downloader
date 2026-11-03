@@ -135,9 +135,19 @@ class Handler(BaseHTTPRequestHandler):
     def error(self, code, msg):
         self.send(code, json.dumps({"error": msg}).encode())
 
+    def foreign(self, path):
+        """Plugin-Endpoints laden hoch und schreiben Dateien. Fremde Webseiten können den
+        eigenen Header nicht mitschicken (Browser verlangt dafür CORS), also nur das Plugin."""
+        if path.startswith("/api/plugin") and self.headers.get("X-Asset-Downloader") != "plugin":
+            self.error(403, "Nur für das Studio-Plugin.")
+            return True
+        return False
+
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(url.query)
+        if self.foreign(url.path):
+            return
         if url.path == "/":
             self.send(200, PAGE.encode(), "text/html; charset=utf-8")
         elif url.path == "/api/status":
@@ -179,6 +189,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urllib.parse.urlparse(self.path)
         if url.path not in ("/api/bulk", "/api/plugin-bulk", "/api/plugin-save", "/api/plugin-store"):
             return self.error(404, "Nicht gefunden")
+        if self.foreign(url.path):
+            return
         place = parse_place(urllib.parse.parse_qs(url.query).get("place", [""])[0])
         text = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8", "ignore")
         if url.path == "/api/plugin-store":
