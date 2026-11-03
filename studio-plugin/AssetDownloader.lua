@@ -363,7 +363,7 @@ local vfxLabel = label("")
 card("Animations-Ordner", "Ordner mit Animationen im Explorer anklicken, z. B. Anubis mit Abilities und Attack.")
 -- Eine Tabelle statt mehrerer locals: Luau erlaubt höchstens 200 lokale Variablen pro Funktion.
 local animUi = {}
-animUi.row, animUi.save, animUi.upload = buttonRow("Herunterladen speichert die Auswahl als eine Datei nach downloads/<Name>/<Name>.rbxm, mit allen Unterordnern und Namen genau wie im Explorer (z. B. Anubis > Abilities > Barrage, Anubis > Attack > M1).\n\nIn der Datei liegt jede Animation als KeyframeSequence mit ihrem Namen, ohne Asset-ID, so wie aus dem Animation Editor gespeichert. So kannst du sie in jeder Place ansehen und bearbeiten. Lässt sich eine nicht laden, bleibt sie als Animation mit ID drin und steht in der Fehlerliste.\n\nUnter meiner ID lädt jede Animation unter deinem Account hoch (und Bilder, falls welche drin sind). In der Datei bleiben die Animation-Objekte mit deinen neuen IDs, jeweils mit der KeyframeSequence darin. Dann laufen die Animationen in deinen eigenen Spielen. Datei: downloads/<Name> (meine IDs)/. Schon hochgeladene Animationen werden nicht doppelt hochgeladen. Braucht apikey.txt mit Assets Read + Write.\n\nIn der anderen Place: Rechtsklick > Insert from File und die .rbxm wählen.",
+animUi.row, animUi.save, animUi.upload = buttonRow("Herunterladen speichert die Auswahl als eine Datei nach downloads/<Name>/<Name>.rbxm, mit allen Unterordnern und Namen genau wie im Explorer (z. B. Anubis > Abilities > Barrage, Anubis > Attack > M1).\n\nIn der Datei liegt jede Animation als KeyframeSequence mit ihrem Namen, ohne Asset-ID, so wie aus dem Animation Editor gespeichert. So kannst du sie in jeder Place ansehen und bearbeiten. Lässt sich eine nicht laden, bleibt sie als Animation mit ID drin und steht in der Fehlerliste.\n\nUnter meiner ID, Ordner mit KeyframeSequences (z. B. aus Herunterladen eingefügt): lädt alle auf einmal unter deinem Account hoch. Danach steckt jede KeyframeSequence in einer Animation mit deiner neuen ID, gleicher Name, gleicher Ort. Kein Rechtsklick > Save to Roblox pro Animation nötig. Strg+Z macht es rückgängig.\n\nUnter meiner ID, Ordner mit Animationen aus einem Spiel (fremde IDs): lädt jede Animation unter deinem Account hoch (und Bilder, falls welche drin sind) und speichert eine Datei, in der die Animation-Objekte deine neuen IDs haben, jeweils mit der KeyframeSequence darin. Dann laufen die Animationen in deinen eigenen Spielen. Datei: downloads/<Name> (meine IDs)/. Schon hochgeladene Animationen werden nicht doppelt hochgeladen. Braucht apikey.txt mit Assets Read + Write.\n\nIn der anderen Place: Rechtsklick > Insert from File und die .rbxm wählen.",
 	"Herunterladen", GREEN, "Unter meiner ID", PURPLE)
 animUi.label = label("")
 
@@ -2721,8 +2721,79 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			status.TextColor3, status.Text = out.TextColor3, savedLine
 		end
 
+		-- KeyframeSequence ohne ID (z. B. aus Herunterladen) als eigene Animation hochladen. Gibt neue ID oder nil, Fehler.
+		local function uploadClip(ks, user)
+			local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, { ks })
+			if not okSer then return nil, "ließ sich nicht als Datei speichern" end
+			local url = ("%s/api/plugin-upload-anim-file?user=%d&name=%s"):format(SERVER, user, HttpService:UrlEncode(ks.Name))
+			local ok, res = pcall(HttpService.RequestAsync, HttpService,
+				{ Url = url, Headers = PLUGIN_HEADERS, Method = "POST", Body = (buffer.tostring(buf):gsub(".", HEX)) })
+			if not ok then return nil, "Server nicht erreichbar oder Zeitüberschreitung" end
+			local okJson, body = pcall(HttpService.JSONDecode, HttpService, res.Body)
+			if not res.Success then return nil, okJson and body.error or ("HTTP " .. res.StatusCode) end
+			return okJson and body.id or nil, "Antwort unlesbar"
+		end
+
+		-- Ordner mit losen KeyframeSequences: alle hochladen, danach steckt jede in einer Animation mit der neuen ID,
+		-- gleicher Name, gleicher Ort. Gibt false, wenn in der Auswahl keine lose KeyframeSequence ist.
+		local function uploadKeyframes(btn, idleText)
+			local out, list = animUi.label, {}
+			for _, root in Selection:Get() do
+				local all = root:GetDescendants()
+				table.insert(all, 1, root)
+				for _, ks in all do
+					if ks:IsA("KeyframeSequence") and not (ks.Parent and ks.Parent:IsA("Animation")) then table.insert(list, ks) end
+				end
+			end
+			if #list == 0 then return false end
+			if not btn.Active then return true end
+			btn.Active = false
+			local user = game:GetService("StudioService"):GetUserId()
+			local ids, errors, done, running = {}, {}, 0, 0
+			btn.Text = progress("Lade hoch", 0, #list)
+			for _, ks in list do
+				while running >= 3 do task.wait() end -- 3 gleichzeitig, Roblox begrenzt Uploads pro Minute
+				running += 1
+				task.spawn(function()
+					local ok, newId, err = pcall(uploadClip, ks, user)
+					if ok and newId then ids[ks] = newId else table.insert(errors, ("%s: %s"):format(ks.Name, tostring(ok and err or newId))) end
+					running -= 1
+					done += 1
+					btn.Text = progress("Lade hoch", done, #list)
+				end)
+			end
+			while running > 0 do task.wait() end
+			local rec = ChangeHistoryService:TryBeginRecording("Animationen unter meiner ID")
+			local count = 0
+			for _, ks in list do
+				if ids[ks] and ks.Parent then
+					local anim = Instance.new("Animation")
+					anim.Name, anim.AnimationId = ks.Name, "rbxassetid://" .. ids[ks]
+					anim.Parent = ks.Parent
+					ks.Parent = anim -- bleibt bearbeitbar, steckt jetzt in der Animation
+					count += 1
+				end
+			end
+			if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+			local lines = { ("%d/%d Animationen unter deiner ID hochgeladen. Jede steckt jetzt in einer Animation mit der neuen ID, am selben Ort (Strg+Z macht es rückgängig)."):format(count, #list) }
+			for i, e in errors do
+				if i > 8 then
+					table.insert(lines, ("… und %d weitere"):format(#errors - 8))
+					break
+				end
+				table.insert(lines, e)
+			end
+			btn.Active, btn.Text = true, idleText
+			out.TextColor3, out.Text = #errors == 0 and OK or BAD, table.concat(lines, "\n")
+			status.TextColor3, status.Text = out.TextColor3, lines[1]
+			return true
+		end
+
 		animUi.save.Activated:Connect(function() saveAnimFolder(false, animUi.save, "Herunterladen") end)
-		animUi.upload.Activated:Connect(function() saveAnimFolder(true, animUi.upload, "Unter meiner ID") end)
+		animUi.upload.Activated:Connect(function()
+			-- Lose Keyframes (ohne ID) direkt hochladen, sonst Animationen mit fremder ID neu hochladen und als Datei sichern.
+			if not uploadKeyframes(animUi.upload, "Unter meiner ID") then saveAnimFolder(true, animUi.upload, "Unter meiner ID") end
+		end)
 	end
 
 	-- Abspielen -------------------------------------------------------------------------------

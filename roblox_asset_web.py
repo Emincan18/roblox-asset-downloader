@@ -8,10 +8,12 @@ neben diesem Script (siehe roblox_asset_downloader.py).
 """
 
 import csv
+import hashlib
 import io
 import json
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -96,17 +98,45 @@ def create_asset(asset_type, name, data, filename, ctype, user_id):
 
 # Schon hochgeladene Animationen (alte ID -> neue ID je User), damit nichts doppelt hochgeladen wird.
 UPLOADS_FILE = Path(__file__).with_name("uploads.json")
+UPLOADS_LOCK = threading.Lock()  # das Plugin lädt mehrere gleichzeitig hoch
+
+
+def known_upload(cache_key):
+    with UPLOADS_LOCK:
+        try:
+            return json.loads(UPLOADS_FILE.read_text("utf-8")).get(cache_key)
+        except (OSError, ValueError):
+            return None
+
+
+def remember_upload(cache_key, new_id):
+    with UPLOADS_LOCK:
+        try:
+            done = json.loads(UPLOADS_FILE.read_text("utf-8"))
+        except (OSError, ValueError):
+            done = {}
+        done[cache_key] = new_id
+        UPLOADS_FILE.write_text(json.dumps(done, indent=1), "utf-8")
+
+
+def upload_animation_file(data, user_id, name=""):
+    """Lädt eine KeyframeSequence, die das Plugin als .rbxm schickt, als eigene Animation hoch.
+    Gleiche Datei wird nur einmal hochgeladen. Gibt die neue ID."""
+    if not data.startswith(b"<roblox"):
+        raise ValueError("Keine Roblox-Datei angekommen.")
+    cache_key = f"{user_id}:sha1:{hashlib.sha1(data).hexdigest()}"
+    new_id = known_upload(cache_key)
+    if not new_id:
+        new_id = create_asset("Animation", safe_name(name) or "Animation", data, "animation.rbxm", "model/x-rbxm", user_id)
+        remember_upload(cache_key, new_id)
+    return new_id
 
 
 def upload_animation(asset_id, user_id, place=None, name=""):
     """Lädt eine fremde Animation herunter und als eigene Animation neu hoch. Gibt die neue ID."""
-    try:
-        done = json.loads(UPLOADS_FILE.read_text("utf-8"))
-    except (OSError, ValueError):
-        done = {}
     cache_key = f"{user_id}:{asset_id}"
-    if cache_key in done:
-        return done[cache_key]
+    if known_upload(cache_key):
+        return known_upload(cache_key)
     data, err = fetch(asset_id, load_cookie(), place)
     if err:
         raise RuntimeError(err)
@@ -115,8 +145,7 @@ def upload_animation(asset_id, user_id, place=None, name=""):
         raise RuntimeError(f"Keine Animation ({ext})")
     title = safe_name(name) or safe_name(asset_info(asset_id)[0]) or "Animation"
     new_id = create_asset("Animation", title, data, f"animation.{ext}", "model/x-rbxm", user_id)
-    done[cache_key] = new_id
-    UPLOADS_FILE.write_text(json.dumps(done, indent=1), "utf-8")
+    remember_upload(cache_key, new_id)
     return new_id
 
 
@@ -237,12 +266,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         url = urllib.parse.urlparse(self.path)
-        if url.path not in ("/api/bulk", "/api/plugin-bulk", "/api/plugin-save", "/api/plugin-store"):
+        if url.path not in ("/api/bulk", "/api/plugin-bulk", "/api/plugin-save", "/api/plugin-store", "/api/plugin-upload-anim-file"):
             return self.error(404, "Nicht gefunden")
         if self.foreign(url.path):
             return
         place = parse_place(urllib.parse.parse_qs(url.query).get("place", [""])[0])
         text = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8", "ignore")
+        if url.path == "/api/plugin-upload-anim-file":
+            # Plugin schickt eine KeyframeSequence als .rbxm (hex), die als eigene Animation hochgeladen wird.
+            qs = urllib.parse.parse_qs(url.query)
+            user = qs.get("user", [""])[0]
+            if not user.isdigit():
+                return self.error(400, "User fehlt.")
+            try:
+                new_id = upload_animation_file(bytes.fromhex(text.strip()), user, qs.get("name", [""])[0])
+            except ValueError as e:
+                return self.error(400, str(e) if "Roblox" in str(e) else "Datei kaputt angekommen.")
+            except Exception as e:
+                return self.error(502, str(e))
+            return self.send(200, json.dumps({"id": new_id}).encode())
         if url.path == "/api/plugin-store":
             # Plugin schickt eine ganze VFX/Ordner-Auswahl als .rbxm (hex, weil Luau-Strings sonst nicht binär-sicher ankommen).
             folder = urllib.parse.parse_qs(url.query).get("folder", [""])[0]
