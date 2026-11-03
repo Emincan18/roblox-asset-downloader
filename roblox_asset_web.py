@@ -182,6 +182,12 @@ class Handler(BaseHTTPRequestHandler):
             name, kind = asset_info(ids[0])
             self.send(200, data, "application/octet-stream", file_name(ids[0], data, name),
                       {"X-Id": ids[0], "X-Name": urllib.parse.quote(name), "X-Type": kind, "X-Ext": guess_ext(data)})
+        elif url.path == "/api/plugin-file":
+            # Gegenstück zu plugin-store: Plugin holt eine gespeicherte Datei zurück (Senden an andere Place).
+            path = safe_dir(q.get("folder", [""])[0]) / safe_name(q.get("file", [""])[0])
+            if not path.is_file():
+                return self.error(404, "Noch nichts gesendet.")
+            self.send(200, path.read_bytes(), "application/octet-stream")
         else:
             self.error(404, "Nicht gefunden")
 

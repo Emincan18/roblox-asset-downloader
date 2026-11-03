@@ -83,6 +83,7 @@ vlist(root, 10)
 
 -- add() legt Elemente in den aktuellen Container (Seite oder Karte), in der Reihenfolge des Aufrufs.
 local container, order = root, 0
+local currentPage = nil -- Seite des aktuellen Tabs; Karten kommen dort hinein
 local function add(inst)
 	order += 1
 	inst.LayoutOrder = order
@@ -210,6 +211,7 @@ local function card(title, subtitle)
 	corner(c, 10)
 	padding(c, 12)
 	vlist(c, 8)
+	container = currentPage or container -- jede Karte direkt auf die Seite, nicht in die vorige Karte
 	add(c)
 	container = c
 	label(title, TEXT, 16).Font = Enum.Font.GothamBold
@@ -256,7 +258,7 @@ end
 
 local function page(name, index)
 	local t = makeButton(name, CARD)
-	t.Size, t.LayoutOrder, t.TextSize = UDim2.new(0.2, -3, 1, 0), index, 12
+	t.Size, t.LayoutOrder, t.TextSize = UDim2.new(1 / 6, -3, 1, 0), index, 11
 	t.Parent = tabBar
 	t.Activated:Connect(function() showTab(name) end)
 	tabs[name] = t
@@ -265,7 +267,7 @@ local function page(name, index)
 	container = root
 	add(p)
 	pages[name] = p
-	container = p
+	container, currentPage = p, p
 	return p
 end
 
@@ -358,6 +360,13 @@ local playSelBtn = button("Auswahl abspielen", BLUE,
 	"Löst alle ParticleEmitter der Auswahl einmal aus (mit EmitCount und EmitDelay, falls gesetzt). Hit-VFX sieht man sonst nicht, weil sie nur per Script feuern.\n\nSpielt immer als Kopie 12 Studs vor deiner Kamera, egal ob die VFX im Workspace, in ReplicatedStorage oder in einem Script liegt. Das Original bleibt unverändert, du kannst beliebig oft abspielen.")
 local vfxLabel = label("")
 
+card("Zu anderer Place", "Auswahl in einer Place senden, in einer anderen Place empfangen. Beide brauchen dieses Plugin und start.bat.")
+local _, sendBtn, receiveBtn = buttonRow("Senden speichert die Explorer-Auswahl beim lokalen Server (downloads/_senden/), mit dem Ordner, in dem jedes Objekt lag.\n\nEmpfangen in der anderen Place legt alles wieder in denselben Ordner, z. B. ReplicatedStorage > Anims. Fehlt der Ordner dort, landet es im nächsten vorhandenen Ordner darüber. Danach ist es ausgewählt, Strg+Z macht es rückgängig.\n\nGesendet bleibt gesendet, bis du etwas Neues sendest. Du kannst also in mehreren Places empfangen.",
+	"Auswahl senden", ACCENT, "Hier empfangen", GREEN)
+local _, sendPlaceBtn, receivePlaceBtn = buttonRow("Ganze Place senden nimmt alles mit: Workspace (mit Terrain), Lighting, ReplicatedFirst, ReplicatedStorage, ServerScriptService, ServerStorage, StarterGui, StarterPack, StarterPlayer, SoundService, Teams, Chat, TextChatService und MaterialService, samt Scripts. Dazu die Einstellungen von Lighting (Uhrzeit, Nebel, Farben …), Workspace (Schwerkraft …) und StarterPlayer (Laufen, Springen, Kamera).\n\nGanze Place empfangen ERSETZT den Inhalt dieser Place durch die gesendete. Deshalb zweimal klicken. Strg+Z macht es rückgängig.\n\nNur außerhalb vom Play-Test.",
+	"Place senden", ACCENT, "Place empfangen", BAD)
+local transferLabel = label("")
+
 -- Tab: ClientFX ----------------------------------------------------------------------------
 
 page("FX", 5)
@@ -390,6 +399,16 @@ vlist(sceneFxList, 4)
 local _, sceneStartBtn, sceneStopBtn = buttonRow("Der Effekt-Code wird nicht ausgeführt: In Kopien fehlen ihm die Daten vom Server, deshalb bricht er fast immer ab.\n\nStattdessen liest das Plugin im Code, welche Objekte der Effekt benutzt (z. B. Client Assets > Whitesnake > DirectOrderThrow), setzt Kopien davon an den Dummy und löst ihre Partikel aus, mit EmitCount und EmitDelay.\n\nDu siehst Partikel, Modelle, Beams und Trails. Bewegungen, die der Code macht (fliegende Fäuste, Tweens), siehst du nicht.\n\nStart spielt den letzten Effekt nochmal. Stopp löscht Dummy und Kopien.",
 	"Start", ACCENT, "Stopp", GREY)
 local sceneLabel = label("")
+
+-- Tab: Cutscene ----------------------------------------------------------------------------
+
+page("Cutscene", 6)
+card("Cutscene", "Cutscene-Script im Explorer anklicken (oder den Ordner, in dem es liegt).")
+local csInfo = label("Noch nichts ausgewählt.")
+local csList = add(autoFrame())
+vlist(csList, 4)
+local _, csDownloadBtn, csRepairBtn = buttonRow("Mein Account: lädt vorher jedes Bild der Cutscene (Texturen, Decals, Partikel) unter deinem Account neu hoch, setzt die neuen IDs in die Kopie ein, auch im Script-Code, und lädt dann alles herunter. Braucht apikey.txt. Animationen und Sounds behalten ihre alten IDs, die lädt der Server nicht hoch.\n\nSucht im Code der ausgewählten Scripts alles, was die Cutscene benutzt: Models, Rigs mit AnimationController oder Humanoid, Kameras, Parts, Animationen, Sounds, Remotes und Module. Module, die per require geladen werden, durchsucht es genauso mit.\n\nAlles landet in downloads/<Name>/: <Name>.rbxm mit den Ordnern Code und Objekte (in Studio per Rechtsklick > Insert from File einfügbar), code.lua zum Lesen und jede Animation, jeder Sound und jedes Bild als eigene Datei.\n\nKlick auf eine Zeile in der Liste zeigt das Objekt im Explorer.",
+	"Herunterladen", ACCENT, "Mein Account", PURPLE)
 
 showTab("Laden")
 container = root
@@ -894,8 +913,11 @@ end
 -- dann .rbxm + alle Texturen nach downloads/<name>/. Nach dem Hochladen tragen Datei und Bilder die neuen IDs.
 -- Schreibt Bytes als Datei nach downloads/<folder>/<file> (leer = <folder>.rbxm). Hex, weil Luau-Strings
 -- im HTTP-Body sonst nicht binär-sicher ankommen.
+local HEX = {}
+for i = 0, 255 do HEX[string.char(i)] = string.format("%02x", i) end
+
 local function store(folder, file, bytes)
-	local hex = bytes:gsub(".", function(c) return string.format("%02x", c:byte()) end)
+	local hex = bytes:gsub(".", HEX) -- Tabelle statt Funktion: bei ganzen Places (viele MB) deutlich schneller
 	local url = ("%s/api/plugin-store?folder=%s&file=%s"):format(SERVER, HttpService:UrlEncode(folder), HttpService:UrlEncode(file))
 	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="POST", Body = hex })
 	return ok and res.Success
@@ -1273,6 +1295,225 @@ end)
 repairBtn.Activated:Connect(function() if repairBtn.Active then backupSelection(true) end end)
 saveSelBtn.Activated:Connect(function() if saveSelBtn.Active then backupSelection(false) end end)
 playSelBtn.Activated:Connect(function() playSelection(vfxLabel) end)
+
+-- Zu anderer Place: Auswahl über den lokalen Server von einem Studio-Fenster ins andere.
+local TRANSFER = "_senden"
+
+sendBtn.Activated:Connect(function()
+	local sel = Selection:Get()
+	if #sel == 0 then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Erst etwas im Explorer auswählen."
+		return
+	end
+	local ok, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, sel)
+	if not ok then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Auswahl ließ sich nicht speichern: " .. tostring(buf)
+		return
+	end
+	local parents = {}
+	for _, obj in sel do table.insert(parents, obj.Parent and obj.Parent:GetFullName() or "") end
+	sendBtn.Active, sendBtn.Text = false, "Sende …"
+	local sent = store(TRANSFER, "auswahl.rbxm", buffer.tostring(buf)) and store(TRANSFER, "ziel.json", HttpService:JSONEncode(parents))
+	sendBtn.Active, sendBtn.Text = true, "Auswahl senden"
+	if sent then
+		transferLabel.TextColor3, transferLabel.Text = OK, ("%d Objekt(e) gesendet. In der anderen Place: Hier empfangen."):format(#sel)
+	else
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Senden fehlgeschlagen. Läuft start.bat?"
+	end
+end)
+
+local function fetchSent(file)
+	local url = ("%s/api/plugin-file?folder=%s&file=%s"):format(SERVER, TRANSFER, file)
+	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method = "GET" })
+	return ok and res.Success and res.Body or nil
+end
+
+-- "ReplicatedStorage.Anims.Boxing" so weit auflösen, wie es diese Place hergibt.
+local function deepestExisting(path)
+	local at = game
+	for _, part in path:split(".") do
+		local nextInst = at:FindFirstChild(part)
+		if not nextInst then break end
+		at = nextInst
+	end
+	return at ~= game and at or workspace
+end
+
+receiveBtn.Activated:Connect(function()
+	local data = fetchSent("auswahl.rbxm")
+	if not data then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Nichts zum Empfangen. Erst in der anderen Place senden, und läuft start.bat?"
+		return
+	end
+	local okDes, objs = pcall(SerializationService.DeserializeInstancesAsync, SerializationService, buffer.fromstring(data))
+	if not okDes then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Gesendete Datei unlesbar: " .. tostring(objs)
+		return
+	end
+	local okJson, parents = pcall(HttpService.JSONDecode, HttpService, fetchSent("ziel.json") or "")
+	parents = okJson and parents or {}
+	local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: Empfangen")
+	local where = {}
+	for i, obj in objs do
+		local target = deepestExisting(parents[i] or "")
+		obj.Parent = target
+		where[target:GetFullName()] = true
+	end
+	if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+	Selection:Set(objs)
+	local list = {}
+	for path in where do table.insert(list, path) end
+	transferLabel.TextColor3, transferLabel.Text = OK, ("%d Objekt(e) empfangen in %s."):format(#objs, table.concat(list, ", "))
+end)
+
+-- Ganze Place: pro Dienst eine Datei, damit keine Anfrage riesig wird.
+local PLACE_SERVICES = { "Workspace", "Lighting", "ReplicatedFirst", "ReplicatedStorage", "ServerScriptService",
+	"ServerStorage", "StarterGui", "StarterPack", "StarterPlayer", "SoundService", "Teams", "Chat", "TextChatService",
+	"MaterialService" }
+-- Feste Kinder, die Studio selbst verwaltet: nicht löschen, Inhalt austauschen statt Objekt.
+local FIXED = { StarterPlayerScripts = true, StarterCharacterScripts = true }
+local SKIP = { Camera = true, Terrain = true }
+-- Einstellungen der Dienste selbst. Reisen als Attribute an einem Ordner mit, weil Attribute Color3 & Co. können.
+local SERVICE_PROPS = {
+	Lighting = { "Ambient", "Brightness", "ClockTime", "ColorShift_Bottom", "ColorShift_Top", "EnvironmentDiffuseScale",
+		"EnvironmentSpecularScale", "GlobalShadows", "OutdoorAmbient", "ShadowSoftness", "GeographicLatitude",
+		"ExposureCompensation", "FogColor", "FogEnd", "FogStart" },
+	Workspace = { "Gravity", "FallenPartsDestroyHeight", "AirDensity" },
+	StarterPlayer = { "CameraMaxZoomDistance", "CameraMinZoomDistance", "CharacterWalkSpeed", "CharacterJumpPower",
+		"CharacterJumpHeight", "CharacterUseJumpPower", "CharacterMaxSlopeAngle", "AutoJumpEnabled",
+		"LoadCharacterAppearance", "HealthDisplayDistance", "NameDisplayDistance" },
+}
+local PROPS_NAME, TERRAIN_NAME = "__AssetDownloaderProps", "__AssetDownloaderTerrain"
+
+sendPlaceBtn.Activated:Connect(function()
+	if RunService:IsRunning() then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Erst den Play-Test beenden."
+		return
+	end
+	sendPlaceBtn.Active = false
+	local sent, empty, failed, total = {}, {}, {}, 0
+	for _, svcName in PLACE_SERVICES do
+		sendPlaceBtn.Text = "Sende " .. svcName .. " …"
+		local svc = game:FindFirstChildOfClass(svcName) or game:FindFirstChild(svcName)
+		if svc then
+			local roots, temp = {}, {}
+			for _, child in svc:GetChildren() do
+				if not (svc == workspace and SKIP[child.Name]) and child.Archivable then table.insert(roots, child) end
+			end
+			if SERVICE_PROPS[svcName] then
+				local props = Instance.new("Folder")
+				props.Name = PROPS_NAME
+				for _, prop in SERVICE_PROPS[svcName] do
+					pcall(function() props:SetAttribute(prop, svc[prop]) end)
+				end
+				table.insert(roots, props)
+				table.insert(temp, props)
+			end
+			if svc == workspace and workspace.Terrain:CountCells() > 0 then
+				local okT, region = pcall(function() return workspace.Terrain:CopyRegion(workspace.Terrain.MaxExtents) end)
+				if okT and region then
+					region.Name = TERRAIN_NAME
+					table.insert(roots, region)
+					table.insert(temp, region)
+				end
+			end
+			local ok, buf = false, nil
+			if #roots > 0 then ok, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, roots) end
+			for _, t in temp do t:Destroy() end
+			if #roots == 0 then
+				table.insert(empty, svcName) -- leer heißt: in der Ziel-Place auch leeren, für 1:1
+			elseif ok and store(TRANSFER, svcName .. ".rbxm", buffer.tostring(buf)) then
+				table.insert(sent, svcName)
+				total += #roots
+			else
+				table.insert(failed, svcName)
+			end
+		end
+	end
+	store(TRANSFER, "place.json", HttpService:JSONEncode({ services = sent, empty = empty }))
+	sendPlaceBtn.Active, sendPlaceBtn.Text = true, "Place senden"
+	if #failed == 0 then
+		transferLabel.TextColor3 = OK
+		transferLabel.Text = ("Ganze Place gesendet: %d Dienste, %d Objekte. In der anderen Place: Place empfangen."):format(#sent, total)
+	else
+		transferLabel.TextColor3 = BAD
+		transferLabel.Text = ("Gesendet: %s. Fehlgeschlagen: %s. Läuft start.bat?"):format(table.concat(sent, ", "), table.concat(failed, ", "))
+	end
+end)
+
+local confirmUntil = 0
+receivePlaceBtn.Activated:Connect(function()
+	if RunService:IsRunning() then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Erst den Play-Test beenden."
+		return
+	end
+	local okList, manifest = pcall(HttpService.JSONDecode, HttpService, fetchSent("place.json") or "")
+	local services = okList and type(manifest) == "table" and manifest.services or {}
+	local emptyServices = okList and type(manifest) == "table" and manifest.empty or {}
+	if #services == 0 then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Keine ganze Place gesendet. Erst in der anderen Place: Ganze Place senden."
+		return
+	end
+	if os.clock() > confirmUntil then
+		confirmUntil = os.clock() + 5
+		receivePlaceBtn.Text = "Sicher? Nochmal klicken"
+		transferLabel.TextColor3 = BAD
+		transferLabel.Text = ("Ersetzt den Inhalt dieser Place (%s). Zum Bestätigen in 5 s nochmal klicken."):format(table.concat(services, ", "))
+		task.delay(5, function() receivePlaceBtn.Text = "Place empfangen" end)
+		return
+	end
+	confirmUntil = 0
+	receivePlaceBtn.Active, receivePlaceBtn.Text = false, "Empfange …"
+	local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: Ganze Place empfangen")
+	local done, failed, total = {}, {}, 0
+	for _, svcName in emptyServices do
+		local svc = game:FindFirstChildOfClass(svcName) or game:FindFirstChild(svcName)
+		if svc then
+			for _, child in svc:GetChildren() do
+				if not FIXED[child.ClassName] then pcall(child.Destroy, child) end
+			end
+		end
+	end
+	for _, svcName in services do
+		local svc = game:FindFirstChildOfClass(svcName) or game:FindFirstChild(svcName)
+		local data = svc and fetchSent(svcName .. ".rbxm")
+		local okDes, objs = false, nil
+		if data then okDes, objs = pcall(SerializationService.DeserializeInstancesAsync, SerializationService, buffer.fromstring(data)) end
+		if not okDes then
+			table.insert(failed, svcName)
+		else
+			-- Alten Inhalt weg, außer Kamera, Terrain und festen Containern.
+			for _, child in svc:GetChildren() do
+				if not (svc == workspace and SKIP[child.Name]) and not FIXED[child.ClassName] then pcall(child.Destroy, child) end
+			end
+			for _, obj in objs do
+				if obj.Name == PROPS_NAME then
+					for prop, value in obj:GetAttributes() do pcall(function() svc[prop] = value end) end
+					obj:Destroy()
+				elseif obj.Name == TERRAIN_NAME and obj:IsA("TerrainRegion") then
+					workspace.Terrain:Clear()
+					pcall(function() workspace.Terrain:PasteRegion(obj, obj.ExtentsMin, true) end)
+					obj:Destroy()
+				elseif FIXED[obj.ClassName] and svc:FindFirstChildOfClass(obj.ClassName) then
+					local existing = svc:FindFirstChildOfClass(obj.ClassName)
+					for _, old in existing:GetChildren() do pcall(old.Destroy, old) end
+					for _, child in obj:GetChildren() do child.Parent = existing end
+					obj:Destroy()
+					total += 1
+				else
+					local okParent = pcall(function() obj.Parent = svc end)
+					if okParent then total += 1 end
+				end
+			end
+			table.insert(done, svcName)
+		end
+	end
+	if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+	receivePlaceBtn.Active, receivePlaceBtn.Text = true, "Place empfangen"
+	transferLabel.TextColor3 = #failed == 0 and OK or BAD
+	transferLabel.Text = ("Empfangen: %d Dienste, %d Objekte.%s Strg+Z macht es rückgängig. Speichern nicht vergessen.")
+		:format(#done, total, #failed > 0 and (" Fehlgeschlagen: " .. table.concat(failed, ", ") .. ".") or "")
+end)
 bulkAllBtn.Activated:Connect(function()
 	for _, item in bulkItems do addToCart(item.id, item.name, item.type) end
 	-- Liste stammt unverändert aus der Explorer-Auswahl: Ordner danach benennen, .rbxm kommt beim Herunterladen dazu.
@@ -1388,7 +1629,7 @@ end
 -- Erkennt Pfade wie u5.Whitesnake.DirectOrderThrow, ["Client Assets"]["The World"].X, :WaitForChild("X")
 -- und "Particles/DebrisPunch". Ein Treffer zählt nur, wenn Eltern- und Kindname zusammen passen,
 -- sonst käme bei "HitEffect" der von jedem Stand mit.
-local PATH_ALIASES = { ClientAssets = "Client Assets", ClientAssetsPath = "Client Assets" }
+local PATH_ALIASES = { ClientAssets = "Client Assets", ClientAssetsPath = "Client Assets", workspace = "Workspace" }
 local VISUAL = { "BasePart", "Model", "Folder", "Attachment", "ParticleEmitter", "Beam", "Trail" }
 local MAX_DESCENDANTS = 200 -- ganze Stand-Ordner (tausende Teile) sind kein Effekt
 
@@ -1423,6 +1664,7 @@ end
 
 local function normalize(code)
 	code = code:gsub(':WaitForChild%("([^"]+)"[^)]*%)', '["%1"]'):gsub(':FindFirstChild%("([^"]+)"[^)]*%)', '["%1"]')
+		:gsub(':GetService%("([^"]+)"%)', '["%1"]')
 	-- Namen mit Leerzeichen bleiben mit \1 statt Leerzeichen ein Wort, bis sie gesucht werden.
 	return (code:gsub('%["([^"]+)"%]', function(n) return "." .. n:gsub(" ", "\1") end))
 end
@@ -1430,7 +1672,9 @@ end
 -- entry.text: der Code des Effekts; entry.source: das ganze Script, für Variablen von weiter oben.
 local aliasCache = {} -- pro Script-Quelltext, damit große Scripts nicht für jeden Abschnitt neu gelesen werden
 
-local function effectObjects(entry, byName)
+-- accept: welche Treffer zählen (Standard: nur, was etwas zeigt). maxDesc: größte erlaubte Objektgröße.
+local function effectObjects(entry, byName, accept, maxDesc)
+	accept, maxDesc = accept or hasVisual, maxDesc or MAX_DESCENDANTS
 	local text = normalize(entry.text)
 	local alias = aliasCache[entry.source]
 	if not alias then
@@ -1449,7 +1693,27 @@ local function effectObjects(entry, byName)
 	end
 
 	local found, seen = {}, {}
+	local function add(obj)
+		-- Ordner, in denen das Script selbst liegt, sind kein Teil des Effekts.
+		local holdsScript = entry.script and entry.script:IsDescendantOf(obj)
+		if obj and not seen[obj] and not holdsScript and #obj:GetDescendants() <= maxDesc and accept(obj) then
+			seen[obj] = true
+			table.insert(found, obj)
+		end
+	end
 	for _, segs in chains do
+		-- script.Parent.X direkt vom Script aus auflösen, Namen allein sagen da nichts.
+		if segs[1] == "script" and entry.script then
+			local node = entry.script
+			for i = 2, #segs do
+				local s = segs[i]:gsub("\1", " ")
+				local nextNode = s == "Parent" and node.Parent or node:FindFirstChild(s)
+				if not nextNode then break end
+				node = nextNode
+			end
+			if node ~= entry.script then add(node) end
+			continue
+		end
 		segs[1] = alias[segs[1]] or segs[1]
 		for i, s in segs do
 			s = s:gsub("\1", " ")
@@ -1459,17 +1723,15 @@ local function effectObjects(entry, byName)
 		for i = #segs, 2, -1 do
 			local hit = nil
 			for _, obj in byName[segs[i]] or {} do
-				if obj.Parent and obj.Parent.Name == segs[i - 1] and #obj:GetDescendants() <= MAX_DESCENDANTS
-					and hasVisual(obj) then
+				if obj.Parent and obj.Parent.Name == segs[i - 1] and obj ~= entry.script
+					and not (entry.script and entry.script:IsDescendantOf(obj))
+					and #obj:GetDescendants() <= maxDesc and accept(obj) then
 					hit = obj
 					break
 				end
 			end
 			if hit then
-				if not seen[hit] then
-					seen[hit] = true
-					table.insert(found, hit)
-				end
+				add(hit)
 				break
 			end
 		end
@@ -1716,6 +1978,191 @@ sceneFxBox:GetPropertyChangedSignal("Text"):Connect(renderFxSearch)
 sceneStartBtn.Activated:Connect(function() startScene(lastEntry) end)
 sceneStopBtn.Activated:Connect(stopScene)
 plugin.Unloading:Connect(stopScene)
+
+-- Cutscene ---------------------------------------------------------------------------------
+-- Was ein Cutscene-Script braucht, steht in seinem Code: Pfade zu Objekten, require(...) auf Module und
+-- Asset-IDs. Gesucht wird wie bei den Effekten, aber jede Objektart zählt und Module werden mit durchsucht.
+do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze von 200
+	local CUTSCENE_MAX_DESCENDANTS = 2000 -- ganze Maps nicht mitnehmen, Cutscene-Sets schon
+	local CUTSCENE_MAX_DEPTH = 4 -- require-Ketten so tief verfolgen
+
+	local function anyInstance(obj)
+		return not obj:IsA("LuaSourceContainer") or obj:IsA("ModuleScript")
+	end
+
+	local function indexAll()
+		local byName = {}
+		for _, obj in game:GetDescendants() do
+			local ok, name = pcall(function() return obj.Name end)
+			if ok then
+				byName[name] = byName[name] or {}
+				table.insert(byName[name], obj)
+			end
+		end
+		return byName
+	end
+
+	local function cutsceneScripts()
+		local scripts, seen = {}, {}
+		for _, sel in Selection:Get() do
+			local list = sel:GetDescendants()
+			table.insert(list, 1, sel)
+			for _, obj in list do
+				if obj:IsA("LuaSourceContainer") and not seen[obj] then
+					seen[obj] = true
+					table.insert(scripts, obj)
+				end
+			end
+		end
+		return scripts
+	end
+
+	-- Gibt Scripts (Auswahl plus benutzte Module), Objekte und Asset-IDs zurück.
+	local function cutsceneDeps(selected)
+		local byName = indexAll()
+		local scripts, objects, ids = {}, {}, {}
+		local seenScript, seenObj, seenId = {}, {}, {}
+		local function addId(id)
+			if #id >= 5 and not seenId[id] then
+				seenId[id] = true
+				table.insert(ids, id)
+			end
+		end
+		local queue = {}
+		for _, s in selected do table.insert(queue, { s, 0 }) end
+		while #queue > 0 do
+			local s, depth = table.unpack(table.remove(queue, 1))
+			if not seenScript[s] then
+				seenScript[s] = true
+				table.insert(scripts, s)
+				local ok, src = pcall(function() return s.Source end)
+				src = ok and src or ""
+				for id in src:gmatch("rbxassetid://(%d+)") do addId(id) end
+				for id in src:gmatch("[?&][iI][dD]=(%d+)") do addId(id) end
+				for id in src:gmatch("[Ii]d%s*=%s*(%d+)") do addId(id) end -- AnimationId = 123, SoundId = 123
+				local entry = { name = s.Name, script = s, line = 1, text = src, source = src }
+				for _, obj in effectObjects(entry, byName, anyInstance, CUTSCENE_MAX_DESCENDANTS) do
+					if obj:IsA("ModuleScript") then
+						if depth < CUTSCENE_MAX_DEPTH then table.insert(queue, { obj, depth + 1 }) end
+					elseif not seenObj[obj] then
+						seenObj[obj] = true
+						table.insert(objects, obj)
+					end
+				end
+			end
+		end
+		-- Objekte, die in einem anderen gefundenen Objekt stecken, nur einmal.
+		local top = {}
+		for _, obj in objects do
+			local inside = false
+			for _, other in objects do
+				if other ~= obj and obj:IsDescendantOf(other) then inside = true break end
+			end
+			if not inside then table.insert(top, obj) end
+		end
+		for _, id in idsIn(top) do addId(id) end
+		return scripts, top, ids
+	end
+
+	local csCurrent = nil -- { scripts, objects, ids }
+
+	local function refreshCutscene()
+		for _, old in csList:GetChildren() do
+			if old:IsA("GuiObject") then old:Destroy() end
+		end
+		local selected = cutsceneScripts()
+		if #selected == 0 then
+			csCurrent = nil
+			csInfo.TextColor3, csInfo.Text = MUTED, "Kein Script ausgewählt. Cutscene-Script oder seinen Ordner im Explorer anklicken."
+			return
+		end
+		local scripts, objects, ids = cutsceneDeps(selected)
+		csCurrent = { scripts = scripts, objects = objects, ids = ids }
+		csInfo.TextColor3 = TEXT
+		csInfo.Text = ("%d Scripts (davon %d Module über require), %d Objekte, %d Asset-IDs.")
+			:format(#scripts, #scripts - #selected, #objects, #ids)
+		local order = 0
+		local function row(text, obj)
+			order += 1
+			if order > 60 then return end -- shortcut: Liste kappt bei 60 Zeilen, heruntergeladen wird trotzdem alles
+			local b = listButton(text, csList)
+			b.LayoutOrder = order
+			if obj then b.Activated:Connect(function() Selection:Set({ obj }) end) end
+		end
+		for _, s in scripts do row(("%s  ·  %s"):format(s.Name, s.ClassName), s) end
+		for _, obj in objects do
+			local rig = obj:FindFirstChildWhichIsA("AnimationController", true) or obj:FindFirstChildWhichIsA("Humanoid", true)
+			row(("%s  ·  %s%s"):format(obj:GetFullName(), obj.ClassName, rig and ", Rig" or ""), obj)
+		end
+		if #ids > 0 then row(("%d Asset-IDs: %s"):format(#ids, table.concat(ids, ", "):sub(1, 120))) end
+	end
+
+	Selection.SelectionChanged:Connect(function()
+		if pages.Cutscene.Visible then refreshCutscene() end
+	end)
+	tabs.Cutscene.Activated:Connect(refreshCutscene)
+
+	local function downloadCutscene(repair, btn, idleText)
+		if not csCurrent then
+			status.TextColor3, status.Text = BAD, "Erst ein Cutscene-Script im Explorer anklicken."
+			return
+		end
+		local name = csCurrent.scripts[1].Name -- der Server entfernt Zeichen, die in Ordnernamen nicht gehen
+		btn.Active, btn.Text = false, "Lade herunter …"
+		local pack = Instance.new("Folder")
+		pack.Name = name
+		local code = {}
+		for folderName, list in { Code = csCurrent.scripts, Objekte = csCurrent.objects } do
+			local f = Instance.new("Folder")
+			f.Name, f.Parent = folderName, pack
+			for _, obj in list do
+				local ok, copy = pcall(function() return obj:Clone() end)
+				if ok and copy then copy.Parent = f end -- nicht archivierbare Objekte liefern nil
+			end
+		end
+		-- Unter eigenem Namen: Bilder in der Kopie neu hochladen und alte IDs überall ersetzen, auch im Code.
+		local lines, map, allOk = {}, {}, true
+		if repair then
+			local found, texIds = collectTextures({ pack }), {}
+			-- Nur IDs aus Textur-Eigenschaften: Bei IDs, die nur im Code stehen, weiß niemand, ob es Bilder sind.
+			for id in found do table.insert(texIds, id) end
+			if #texIds > 0 then lines, allOk, map = repairTextures(found, texIds, btn) end
+			for _, s in pack:GetDescendants() do
+				if s:IsA("LuaSourceContainer") then
+					pcall(function()
+						s.Source = s.Source:gsub("rbxassetid://(%d+)", function(id) return map[id] and ("rbxassetid://" .. map[id]) end)
+					end)
+				end
+			end
+		end
+		for _, s in pack:GetDescendants() do
+			if s:IsA("LuaSourceContainer") then
+				local ok, src = pcall(function() return s.Source end)
+				if ok then table.insert(code, ("-- ===== %s (%s) =====\n%s"):format(s:GetFullName(), s.ClassName, src)) end
+			end
+		end
+		btn.Text = "Speichere …"
+		local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, { pack })
+		pack:Destroy()
+		local stored = okSer and store(name, "", buffer.tostring(buf))
+		table.insert(lines, stored and ("Gespeichert: downloads/%s/%s.rbxm"):format(name, name)
+			or "Cutscene konnte nicht gespeichert werden. Läuft start.bat?")
+		if #code > 0 and store(name, "code.lua", table.concat(code, "\n\n")) then table.insert(lines, "Code zum Lesen: code.lua") end
+		if #csCurrent.ids > 0 then
+			-- Hochgeladene Bilder unter der neuen ID speichern, den Rest (Animationen, Sounds) unter der alten.
+			local fileIds = {}
+			for _, id in csCurrent.ids do table.insert(fileIds, map[id] or id) end
+			local r = save(fileIds, name, btn, "Speichere …")
+			if r then table.insert(lines, ("%d/%d Assets gespeichert (Animationen, Sounds, Bilder)."):format(r.saved, r.total)) end
+			allOk = allOk and r ~= nil and r.saved == r.total
+		end
+		btn.Active, btn.Text = true, idleText
+		status.TextColor3, status.Text = (allOk and stored) and OK or BAD, table.concat(lines, "\n")
+	end
+
+	csDownloadBtn.Activated:Connect(function() downloadCutscene(false, csDownloadBtn, "Herunterladen") end)
+	csRepairBtn.Activated:Connect(function() downloadCutscene(true, csRepairBtn, "Mein Account") end)
+end
 
 -- Aufnahme im Play-Test --------------------------------------------------------------------
 -- Studio lädt das Plugin im Play-Test einmal auf dem Server und einmal auf dem Client.
