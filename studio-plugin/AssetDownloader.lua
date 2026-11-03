@@ -356,6 +356,13 @@ local playSelBtn = button("Auswahl abspielen", BLUE,
 	"Löst alle ParticleEmitter der Auswahl einmal aus (mit EmitCount und EmitDelay, falls gesetzt). Hit-VFX sieht man sonst nicht, weil sie nur per Script feuern.\n\nLose Attachments ohne Part kommen dafür an ein unsichtbares Teil vor dir. Strg+Z macht das rückgängig.")
 local vfxLabel = label("")
 
+card("Zu anderer Place", "Auswahl in einer Place senden, in einer anderen Place empfangen. Beide brauchen dieses Plugin und start.bat.")
+local _, sendBtn, receiveBtn = buttonRow("Senden speichert die Explorer-Auswahl beim lokalen Server (downloads/_senden/), mit dem Ordner, in dem jedes Objekt lag.\n\nEmpfangen in der anderen Place legt alles wieder in denselben Ordner, z. B. ReplicatedStorage > Anims. Fehlt der Ordner dort, landet es im nächsten vorhandenen Ordner darüber. Danach ist es ausgewählt, Strg+Z macht es rückgängig.\n\nGesendet bleibt gesendet, bis du etwas Neues sendest. Du kannst also in mehreren Places empfangen.",
+	"Auswahl senden", ACCENT, "Hier empfangen", GREEN)
+local _, sendPlaceBtn, receivePlaceBtn = buttonRow("Ganze Place senden nimmt alles mit: Workspace (mit Terrain), Lighting, ReplicatedFirst, ReplicatedStorage, ServerScriptService, ServerStorage, StarterGui, StarterPack, StarterPlayer, SoundService, Teams, Chat, TextChatService und MaterialService, samt Scripts. Dazu die Einstellungen von Lighting (Uhrzeit, Nebel, Farben …), Workspace (Schwerkraft …) und StarterPlayer (Laufen, Springen, Kamera).\n\nGanze Place empfangen ERSETZT den Inhalt dieser Place durch die gesendete. Deshalb zweimal klicken. Strg+Z macht es rückgängig.\n\nNur außerhalb vom Play-Test.",
+	"Ganze Place senden", ACCENT, "Ganze Place empfangen", BAD)
+local transferLabel = label("")
+
 -- Tab: ClientFX ----------------------------------------------------------------------------
 
 page("FX", 5)
@@ -872,8 +879,11 @@ end
 -- dann .rbxm + alle Texturen nach downloads/<name>/. Nach dem Hochladen tragen Datei und Bilder die neuen IDs.
 -- Schreibt Bytes als Datei nach downloads/<folder>/<file> (leer = <folder>.rbxm). Hex, weil Luau-Strings
 -- im HTTP-Body sonst nicht binär-sicher ankommen.
+local HEX = {}
+for i = 0, 255 do HEX[string.char(i)] = string.format("%02x", i) end
+
 local function store(folder, file, bytes)
-	local hex = bytes:gsub(".", function(c) return string.format("%02x", c:byte()) end)
+	local hex = bytes:gsub(".", HEX) -- Tabelle statt Funktion: bei ganzen Places (viele MB) deutlich schneller
 	local url = ("%s/api/plugin-store?folder=%s&file=%s"):format(SERVER, HttpService:UrlEncode(folder), HttpService:UrlEncode(file))
 	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "POST", Body = hex })
 	return ok and res.Success
@@ -1249,6 +1259,225 @@ end)
 repairBtn.Activated:Connect(function() if repairBtn.Active then backupSelection(true) end end)
 saveSelBtn.Activated:Connect(function() if saveSelBtn.Active then backupSelection(false) end end)
 playSelBtn.Activated:Connect(function() playSelection(vfxLabel) end)
+
+-- Zu anderer Place: Auswahl über den lokalen Server von einem Studio-Fenster ins andere.
+local TRANSFER = "_senden"
+
+sendBtn.Activated:Connect(function()
+	local sel = Selection:Get()
+	if #sel == 0 then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Erst etwas im Explorer auswählen."
+		return
+	end
+	local ok, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, sel)
+	if not ok then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Auswahl ließ sich nicht speichern: " .. tostring(buf)
+		return
+	end
+	local parents = {}
+	for _, obj in sel do table.insert(parents, obj.Parent and obj.Parent:GetFullName() or "") end
+	sendBtn.Active, sendBtn.Text = false, "Sende …"
+	local sent = store(TRANSFER, "auswahl.rbxm", buffer.tostring(buf)) and store(TRANSFER, "ziel.json", HttpService:JSONEncode(parents))
+	sendBtn.Active, sendBtn.Text = true, "Auswahl senden"
+	if sent then
+		transferLabel.TextColor3, transferLabel.Text = OK, ("%d Objekt(e) gesendet. In der anderen Place: Hier empfangen."):format(#sel)
+	else
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Senden fehlgeschlagen. Läuft start.bat?"
+	end
+end)
+
+local function fetchSent(file)
+	local url = ("%s/api/plugin-file?folder=%s&file=%s"):format(SERVER, TRANSFER, file)
+	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "GET" })
+	return ok and res.Success and res.Body or nil
+end
+
+-- "ReplicatedStorage.Anims.Boxing" so weit auflösen, wie es diese Place hergibt.
+local function deepestExisting(path)
+	local at = game
+	for _, part in path:split(".") do
+		local nextInst = at:FindFirstChild(part)
+		if not nextInst then break end
+		at = nextInst
+	end
+	return at ~= game and at or workspace
+end
+
+receiveBtn.Activated:Connect(function()
+	local data = fetchSent("auswahl.rbxm")
+	if not data then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Nichts zum Empfangen. Erst in der anderen Place senden, und läuft start.bat?"
+		return
+	end
+	local okDes, objs = pcall(SerializationService.DeserializeInstancesAsync, SerializationService, buffer.fromstring(data))
+	if not okDes then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Gesendete Datei unlesbar: " .. tostring(objs)
+		return
+	end
+	local okJson, parents = pcall(HttpService.JSONDecode, HttpService, fetchSent("ziel.json") or "")
+	parents = okJson and parents or {}
+	local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: Empfangen")
+	local where = {}
+	for i, obj in objs do
+		local target = deepestExisting(parents[i] or "")
+		obj.Parent = target
+		where[target:GetFullName()] = true
+	end
+	if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+	Selection:Set(objs)
+	local list = {}
+	for path in where do table.insert(list, path) end
+	transferLabel.TextColor3, transferLabel.Text = OK, ("%d Objekt(e) empfangen in %s."):format(#objs, table.concat(list, ", "))
+end)
+
+-- Ganze Place: pro Dienst eine Datei, damit keine Anfrage riesig wird.
+local PLACE_SERVICES = { "Workspace", "Lighting", "ReplicatedFirst", "ReplicatedStorage", "ServerScriptService",
+	"ServerStorage", "StarterGui", "StarterPack", "StarterPlayer", "SoundService", "Teams", "Chat", "TextChatService",
+	"MaterialService" }
+-- Feste Kinder, die Studio selbst verwaltet: nicht löschen, Inhalt austauschen statt Objekt.
+local FIXED = { StarterPlayerScripts = true, StarterCharacterScripts = true }
+local SKIP = { Camera = true, Terrain = true }
+-- Einstellungen der Dienste selbst. Reisen als Attribute an einem Ordner mit, weil Attribute Color3 & Co. können.
+local SERVICE_PROPS = {
+	Lighting = { "Ambient", "Brightness", "ClockTime", "ColorShift_Bottom", "ColorShift_Top", "EnvironmentDiffuseScale",
+		"EnvironmentSpecularScale", "GlobalShadows", "OutdoorAmbient", "ShadowSoftness", "GeographicLatitude",
+		"ExposureCompensation", "FogColor", "FogEnd", "FogStart" },
+	Workspace = { "Gravity", "FallenPartsDestroyHeight", "AirDensity" },
+	StarterPlayer = { "CameraMaxZoomDistance", "CameraMinZoomDistance", "CharacterWalkSpeed", "CharacterJumpPower",
+		"CharacterJumpHeight", "CharacterUseJumpPower", "CharacterMaxSlopeAngle", "AutoJumpEnabled",
+		"LoadCharacterAppearance", "HealthDisplayDistance", "NameDisplayDistance" },
+}
+local PROPS_NAME, TERRAIN_NAME = "__AssetDownloaderProps", "__AssetDownloaderTerrain"
+
+sendPlaceBtn.Activated:Connect(function()
+	if RunService:IsRunning() then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Erst den Play-Test beenden."
+		return
+	end
+	sendPlaceBtn.Active = false
+	local sent, empty, failed, total = {}, {}, {}, 0
+	for _, svcName in PLACE_SERVICES do
+		sendPlaceBtn.Text = "Sende " .. svcName .. " …"
+		local svc = game:FindFirstChildOfClass(svcName) or game:FindFirstChild(svcName)
+		if svc then
+			local roots, temp = {}, {}
+			for _, child in svc:GetChildren() do
+				if not (svc == workspace and SKIP[child.Name]) and child.Archivable then table.insert(roots, child) end
+			end
+			if SERVICE_PROPS[svcName] then
+				local props = Instance.new("Folder")
+				props.Name = PROPS_NAME
+				for _, prop in SERVICE_PROPS[svcName] do
+					pcall(function() props:SetAttribute(prop, svc[prop]) end)
+				end
+				table.insert(roots, props)
+				table.insert(temp, props)
+			end
+			if svc == workspace and workspace.Terrain:CountCells() > 0 then
+				local okT, region = pcall(function() return workspace.Terrain:CopyRegion(workspace.Terrain.MaxExtents) end)
+				if okT and region then
+					region.Name = TERRAIN_NAME
+					table.insert(roots, region)
+					table.insert(temp, region)
+				end
+			end
+			local ok, buf = false, nil
+			if #roots > 0 then ok, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, roots) end
+			for _, t in temp do t:Destroy() end
+			if #roots == 0 then
+				table.insert(empty, svcName) -- leer heißt: in der Ziel-Place auch leeren, für 1:1
+			elseif ok and store(TRANSFER, svcName .. ".rbxm", buffer.tostring(buf)) then
+				table.insert(sent, svcName)
+				total += #roots
+			else
+				table.insert(failed, svcName)
+			end
+		end
+	end
+	store(TRANSFER, "place.json", HttpService:JSONEncode({ services = sent, empty = empty }))
+	sendPlaceBtn.Active, sendPlaceBtn.Text = true, "Ganze Place senden"
+	if #failed == 0 then
+		transferLabel.TextColor3 = OK
+		transferLabel.Text = ("Ganze Place gesendet: %d Dienste, %d Objekte. In der anderen Place: Ganze Place empfangen."):format(#sent, total)
+	else
+		transferLabel.TextColor3 = BAD
+		transferLabel.Text = ("Gesendet: %s. Fehlgeschlagen: %s. Läuft start.bat?"):format(table.concat(sent, ", "), table.concat(failed, ", "))
+	end
+end)
+
+local confirmUntil = 0
+receivePlaceBtn.Activated:Connect(function()
+	if RunService:IsRunning() then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Erst den Play-Test beenden."
+		return
+	end
+	local okList, manifest = pcall(HttpService.JSONDecode, HttpService, fetchSent("place.json") or "")
+	local services = okList and type(manifest) == "table" and manifest.services or {}
+	local emptyServices = okList and type(manifest) == "table" and manifest.empty or {}
+	if #services == 0 then
+		transferLabel.TextColor3, transferLabel.Text = BAD, "Keine ganze Place gesendet. Erst in der anderen Place: Ganze Place senden."
+		return
+	end
+	if os.clock() > confirmUntil then
+		confirmUntil = os.clock() + 5
+		receivePlaceBtn.Text = "Sicher? Nochmal klicken"
+		transferLabel.TextColor3 = BAD
+		transferLabel.Text = ("Ersetzt den Inhalt dieser Place (%s). Zum Bestätigen in 5 s nochmal klicken."):format(table.concat(services, ", "))
+		task.delay(5, function() receivePlaceBtn.Text = "Ganze Place empfangen" end)
+		return
+	end
+	confirmUntil = 0
+	receivePlaceBtn.Active, receivePlaceBtn.Text = false, "Empfange …"
+	local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: Ganze Place empfangen")
+	local done, failed, total = {}, {}, 0
+	for _, svcName in emptyServices do
+		local svc = game:FindFirstChildOfClass(svcName) or game:FindFirstChild(svcName)
+		if svc then
+			for _, child in svc:GetChildren() do
+				if not FIXED[child.ClassName] then pcall(child.Destroy, child) end
+			end
+		end
+	end
+	for _, svcName in services do
+		local svc = game:FindFirstChildOfClass(svcName) or game:FindFirstChild(svcName)
+		local data = svc and fetchSent(svcName .. ".rbxm")
+		local okDes, objs = false, nil
+		if data then okDes, objs = pcall(SerializationService.DeserializeInstancesAsync, SerializationService, buffer.fromstring(data)) end
+		if not okDes then
+			table.insert(failed, svcName)
+		else
+			-- Alten Inhalt weg, außer Kamera, Terrain und festen Containern.
+			for _, child in svc:GetChildren() do
+				if not (svc == workspace and SKIP[child.Name]) and not FIXED[child.ClassName] then pcall(child.Destroy, child) end
+			end
+			for _, obj in objs do
+				if obj.Name == PROPS_NAME then
+					for prop, value in obj:GetAttributes() do pcall(function() svc[prop] = value end) end
+					obj:Destroy()
+				elseif obj.Name == TERRAIN_NAME and obj:IsA("TerrainRegion") then
+					workspace.Terrain:Clear()
+					pcall(function() workspace.Terrain:PasteRegion(obj, obj.ExtentsMin, true) end)
+					obj:Destroy()
+				elseif FIXED[obj.ClassName] and svc:FindFirstChildOfClass(obj.ClassName) then
+					local existing = svc:FindFirstChildOfClass(obj.ClassName)
+					for _, old in existing:GetChildren() do pcall(old.Destroy, old) end
+					for _, child in obj:GetChildren() do child.Parent = existing end
+					obj:Destroy()
+					total += 1
+				else
+					local okParent = pcall(function() obj.Parent = svc end)
+					if okParent then total += 1 end
+				end
+			end
+			table.insert(done, svcName)
+		end
+	end
+	if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+	receivePlaceBtn.Active, receivePlaceBtn.Text = true, "Ganze Place empfangen"
+	transferLabel.TextColor3 = #failed == 0 and OK or BAD
+	transferLabel.Text = ("Empfangen: %d Dienste, %d Objekte.%s Strg+Z macht es rückgängig. Speichern nicht vergessen.")
+		:format(#done, total, #failed > 0 and (" Fehlgeschlagen: " .. table.concat(failed, ", ") .. ".") or "")
+end)
 bulkAllBtn.Activated:Connect(function()
 	for _, item in bulkItems do addToCart(item.id, item.name, item.type) end
 end)
