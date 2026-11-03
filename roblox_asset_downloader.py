@@ -94,8 +94,9 @@ def creator_places(asset_id):
     try:
         with urllib.request.urlopen(f"https://economy.roblox.com/v2/assets/{asset_id}/details", timeout=10) as r:
             creator = json.load(r)["Creator"]
-        kind = "groups" if creator["CreatorType"] == "Group" else "users"
-        url = f"https://games.roblox.com/v2/{kind}/{creator['CreatorTargetId']}/games?accessFilter=2&limit=10"
+        # Gruppen: accessFilter=1 liefert auch private Test-Places. Der User-Endpoint kennt nur 2 (öffentlich).
+        kind, access = ("groups", 1) if creator["CreatorType"] == "Group" else ("users", 2)
+        url = f"https://games.roblox.com/v2/{kind}/{creator['CreatorTargetId']}/games?accessFilter={access}&limit=10"
         with urllib.request.urlopen(url, timeout=10) as r:
             return [g["rootPlace"]["id"] for g in json.load(r)["data"]][:5]
     except Exception:
