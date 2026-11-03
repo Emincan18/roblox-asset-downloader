@@ -102,16 +102,68 @@ def creator_places(asset_id):
         return []
 
 
-def fetch(asset_id, cookie):
+PLACES_FILE = Path(__file__).with_name("places.txt")
+NOT_APPROVED = "Von Roblox nicht freigegeben (moderiert)"
+
+
+def load_places():
+    try:
+        return [int(x) for x in PLACES_FILE.read_text("utf-8").split() if x.isdigit()]
+    except OSError:
+        return []
+
+
+# Spiele, über die schon einmal ein gesperrtes Asset geladen wurde. Werden zuerst probiert.
+KNOWN_PLACES = load_places()
+
+
+def remember_place(place_id):
+    if place_id in KNOWN_PLACES:
+        KNOWN_PLACES.remove(place_id)
+    KNOWN_PLACES.insert(0, place_id)
+    del KNOWN_PLACES[20:]
+    try:
+        PLACES_FILE.write_text("\n".join(map(str, KNOWN_PLACES)), "utf-8")
+    except OSError:
+        pass
+
+
+def parse_place(text):
+    """Place-ID aus Zahl oder Spiel-Link wie roblox.com/games/2809202155/..."""
+    m = re.search(r"games/(\d+)", text or "") or re.fullmatch(r"\s*(\d+)\s*", text or "")
+    return int(m.group(1)) if m else None
+
+
+def fetch(asset_id, cookie, place_id=None):
     """Lädt ein Asset. Gibt (bytes, None) oder (None, Fehlertext) zurück."""
     data, error = fetch_once(asset_id, cookie)
-    if error and cookie and "Kein Zugriff" in error:
-        # Gesperrte Animationen/Audios gibt Roblox im Kontext eines Spiels des Erstellers heraus.
-        for place_id in creator_places(asset_id):
-            data, retry_error = fetch_once(asset_id, cookie, place_id)
-            if not retry_error:
-                return data, None
+    if error and cookie and error.startswith("Kein Zugriff"):
+        # Gesperrte Animationen/Audios gibt Roblox nur im Kontext eines Spiels heraus, das sie nutzen darf.
+        tried = set()
+        for candidates in ([place_id] if place_id else [], list(KNOWN_PLACES), creator_places(asset_id)):
+            for place in candidates:
+                if place in tried:
+                    continue
+                tried.add(place)
+                data, retry_error = fetch_once(asset_id, cookie, place)
+                if not retry_error:
+                    remember_place(place)
+                    return data, None
+        if place_id is None and not KNOWN_PLACES:
+            error += ". Tipp: Link des Spiels angeben, aus dem die ID stammt."
     return data, error
+
+
+def fetch_many(ids, cookie, place_id=None):
+    """Lädt viele Assets parallel. Fehlschläge bekommen eine zweite Runde,
+    weil andere Assets inzwischen ein passendes Spiel gefunden haben können."""
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = dict(zip(ids, pool.map(lambda i: fetch(i, cookie, place_id), ids)))
+    retry = [i for i, (_, err) in results.items() if err and err.startswith("Kein Zugriff") and KNOWN_PLACES]
+    if retry:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results.update(zip(retry, pool.map(lambda i: fetch(i, cookie, place_id), retry)))
+    return [(i, *results[i]) for i in ids]
 
 
 def fetch_once(asset_id, cookie, place_id=None):
@@ -129,6 +181,8 @@ def fetch_once(asset_id, cookie, place_id=None):
             if e.code == 429 and attempt < 3:  # Rate-Limit: kurz warten, dann nochmal
                 time.sleep(2 ** attempt * 2)
                 continue
+            if b"not approved" in e.read():
+                return None, NOT_APPROVED
             reason = {401: "Login nötig (cookie.txt fehlt oder abgelaufen)", 403: "Kein Zugriff (Login fehlt oder Asset ist gesperrt)", 404: "Nicht gefunden"}.get(e.code, f"HTTP {e.code}")
             return None, reason
         except Exception as e:  # Netzwerkfehler sollen nicht den ganzen Bulk-Lauf stoppen
@@ -138,20 +192,12 @@ def fetch_once(asset_id, cookie, place_id=None):
     return data, None
 
 
-def download(asset_id, out_dir, cookie):
-    data, error = fetch(asset_id, cookie)
-    if error:
-        return asset_id, "fehler", error, ""
-    path = out_dir / f"{asset_id}.{guess_ext(data)}"
-    path.write_bytes(data)
-    return asset_id, "ok", f"{len(data):,} Bytes", path.name
-
-
 def main():
     ap = argparse.ArgumentParser(description="Roblox-Assets per ID oder Link in Massen herunterladen.")
     ap.add_argument("inputs", nargs="*", help="Dateien, Links oder IDs")
     ap.add_argument("-o", "--out", default="downloads")
     ap.add_argument("--bare", action="store_true")
+    ap.add_argument("--place", help="Spiel-Link oder Place-ID, aus dem die Assets stammen")
     args = ap.parse_args()
 
     parts = []
@@ -179,12 +225,18 @@ def main():
     print(f"{len(ids)} IDs gefunden. Lade nach {out_dir.resolve()} ...")
 
     ok = 0
-    with ThreadPoolExecutor(max_workers=6) as pool, open(out_dir / "report.csv", "w", newline="", encoding="utf-8") as f:
+    with open(out_dir / "report.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["id", "status", "info", "datei"])
-        for row in pool.map(lambda i: download(i, out_dir, cookie), ids):
+        for asset_id, data, error in fetch_many(ids, cookie, parse_place(args.place)):
+            if error:
+                row = [asset_id, "fehler", error, ""]
+            else:
+                path = out_dir / f"{asset_id}.{guess_ext(data)}"
+                path.write_bytes(data)
+                row = [asset_id, "ok", f"{len(data):,} Bytes", path.name]
+                ok += 1
             w.writerow(row)
-            ok += row[1] == "ok"
             print(f"  {row[0]:>14}  {row[1]:6}  {row[3] or row[2]}")
     print(f"Fertig: {ok}/{len(ids)} geladen. Liste: {out_dir / 'report.csv'}")
 
@@ -192,4 +244,5 @@ def main():
 if __name__ == "__main__":
     assert extract_ids("rbxassetid://123456 roblox.com/catalog/77777/x rbxassetid://123456") == ["123456", "77777"]
     assert guess_ext(b"OggS....") == "ogg" and guess_ext(b"<roblox!x") == "rbxm"
+    assert parse_place("https://www.roblox.com/games/2809202155/YBA") == 2809202155 and parse_place("") is None
     main()

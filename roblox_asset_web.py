@@ -15,10 +15,9 @@ import urllib.parse
 import urllib.request
 import webbrowser
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from roblox_asset_downloader import extract_ids, fetch, guess_ext, load_cookie
+from roblox_asset_downloader import extract_ids, fetch, fetch_many, guess_ext, load_cookie, parse_place
 
 PORT = 8765
 ASSET_TYPES = {1: "Image", 2: "T-Shirt", 3: "Audio", 4: "Mesh", 8: "Hat", 10: "Model", 11: "Shirt", 12: "Pants",
@@ -70,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
             ids = extract_ids(q.get("q", [""])[0], bare=True)
             if not ids:
                 return self.error(400, "Keine gültige Asset-ID gefunden.")
-            data, err = fetch(ids[0], load_cookie())
+            data, err = fetch(ids[0], load_cookie(), parse_place(q.get("place", [""])[0]))
             if err:
                 return self.error(502, err)
             self.send(200, data, "application/octet-stream", file_name(ids[0], data))
@@ -78,15 +77,15 @@ class Handler(BaseHTTPRequestHandler):
             self.error(404, "Nicht gefunden")
 
     def do_POST(self):
-        if self.path != "/api/bulk":
+        url = urllib.parse.urlparse(self.path)
+        if url.path != "/api/bulk":
             return self.error(404, "Nicht gefunden")
+        place = parse_place(urllib.parse.parse_qs(url.query).get("place", [""])[0])
         text = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8", "ignore")
         ids = extract_ids(text, bare=True)
         if not ids:
             return self.error(400, "Keine gültigen Asset-IDs gefunden.")
-        cookie = load_cookie()
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            results = list(pool.map(lambda i: (i, *fetch(i, cookie)), ids))
+        results = fetch_many(ids, load_cookie(), place)
         buf, report = io.BytesIO(), io.StringIO()
         w = csv.writer(report)
         w.writerow(["id", "status", "datei / fehler"])
@@ -140,6 +139,12 @@ button:disabled { opacity:.6; cursor:wait; }
     <p class="status" id="status"></p>
   </header>
 
+  <div class="card">
+    <label class="label" for="place">Spiel, aus dem die Assets stammen (optional)</label>
+    <input id="place" placeholder="z. B. https://www.roblox.com/games/2809202155/..." autocomplete="off">
+    <p class="status">Manche Animationen und Sounds gibt Roblox nur im Kontext ihres Spiels heraus. Ein Spiel, über das es einmal geklappt hat, merkt sich das Tool.</p>
+  </div>
+
   <form class="card" id="one">
     <label class="label" for="q">Asset-ID oder Link</label>
     <div class="row">
@@ -158,6 +163,9 @@ button:disabled { opacity:.6; cursor:wait; }
 </div>
 <script>
 const $ = id => document.getElementById(id);
+const place = () => "&place=" + encodeURIComponent($("place").value.trim());
+try { $("place").value = localStorage.getItem("place") || ""; } catch {}
+$("place").onchange = () => { try { localStorage.setItem("place", $("place").value.trim()); } catch {} };
 
 fetch("/api/status").then(r => r.json()).then(s => {
   $("status").innerHTML = s.login
@@ -189,7 +197,7 @@ $("one").onsubmit = e => {
   const q = $("q").value.trim();
   if (!q) return;
   run($("oneBtn"), $("oneMsg"), "Lade …", async () =>
-    save(await fetch("/api/download?q=" + encodeURIComponent(q)), $("oneMsg"), n => "Gespeichert: " + n));
+    save(await fetch("/api/download?q=" + encodeURIComponent(q) + place()), $("oneMsg"), n => "Gespeichert: " + n));
 };
 
 $("bulk").onsubmit = e => {
@@ -197,7 +205,7 @@ $("bulk").onsubmit = e => {
   const text = $("list").value.trim();
   if (!text) return;
   run($("bulkBtn"), $("bulkMsg"), "Lade alle … (kann dauern)", async () =>
-    save(await fetch("/api/bulk", { method: "POST", body: text }), $("bulkMsg"),
+    save(await fetch("/api/bulk?x=1" + place(), { method: "POST", body: text }), $("bulkMsg"),
       (n, r) => (r.headers.get("X-Result") || "") + " geladen: " + n + " (Details in report.csv)"));
 };
 </script>

@@ -53,7 +53,9 @@ Lädt alles nach `downloads/`. Mit `-o ORDNER` kannst du einen anderen Zielordne
 
 - Erkannt werden IDs, `rbxassetid://`-Links, Catalog-, Library-, Bundle- und Creator-Store-Links.
 - Dateien heißen `Name (ID).endung`. Die Endung wird am Inhalt erkannt (`.rbxm`, `.rbxmx`, `.ogg`, `.mp3`, `.png`, `.mesh` …).
-- Gesperrte Animationen und Audios lädt das Tool automatisch über ein Spiel des Erstellers. Ohne öffentliches Spiel des Erstellers bleiben sie gesperrt.
+- Viele Animationen und Sounds gibt Roblox nur im Kontext des Spiels heraus, das sie benutzen darf. Das Tool probiert automatisch die Spiele des Erstellers. Klappt es über ein Spiel, merkt es sich das in `places.txt` und nutzt es für alle weiteren Assets. Beim Bulk-Download bekommen Fehlschläge deshalb eine zweite Runde.
+- Wenn trotzdem „Kein Zugriff“ kommt: Im Feld **Spiel** den Link des Spiels einfügen, aus dem die IDs stammen (Kommandozeile: `--place LINK`).
+- „Von Roblox nicht freigegeben (moderiert)“ heißt, Roblox hat das Asset gesperrt. Das kann niemand mehr herunterladen.
 - Binäre `.rbxm`/`.rbxl`-Dateien kann der ID-Extractor nicht lesen. In Studio als `.rbxmx`/`.rbxlx` speichern.
 
 Nutze nur Assets, die du verwenden darfst. Die Rechte an fremden Assets liegen bei ihren Erstellern.

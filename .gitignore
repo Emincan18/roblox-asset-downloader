@@ -1,5 +1,6 @@
 # Persönlicher Roblox-Login, niemals hochladen
 cookie.txt
+places.txt
 *.bak-*
 
 __pycache__/
