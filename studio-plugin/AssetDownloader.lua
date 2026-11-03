@@ -663,13 +663,30 @@ view.InputEnded:Connect(function(input)
 end)
 view.MouseLeave:Connect(function() cam.drag = nil end)
 
+-- R6-Rigs haben oft den Kopf als PrimaryPart. Wer dann PrimaryPart verankert, friert den Kopf ein und der
+-- Körper dreht sich um ihn herum. Deshalb: HumanoidRootPart als PrimaryPart, nur er verankert, Rest lose.
+-- root: Wurzel des Rigs (Standard: HumanoidRootPart). Wird PrimaryPart. Teile, die ein Motor6D bewegt, werden
+-- gelöst, sonst bleiben sie stehen. Lose Teile (z. B. VFX) bleiben, wie sie sind.
+local function fixRigRoot(rig, root)
+	root = root or rig:FindFirstChild("HumanoidRootPart") or rig.PrimaryPart
+	if root then rig.PrimaryPart = root end
+	for _, j in rig:GetDescendants() do
+		if j:IsA("Motor6D") then
+			for _, part in { j.Part0, j.Part1 } do
+				if part and part ~= root and part:IsDescendantOf(rig) then part.Anchored = false end
+			end
+		end
+	end
+	return rig
+end
+
 -- Rig für die Animation: ausgewähltes Model mit Humanoid, sonst ein Standard-Dummy.
 local function makeRig(clip)
 	for _, sel in Selection:Get() do
 		local m = sel:IsA("Model") and sel or sel:FindFirstAncestorWhichIsA("Model")
 		if m and m:FindFirstChildWhichIsA("Humanoid", true) then
 			local ok, copy = pcall(function() return m:Clone() end)
-			if ok and copy then return copy end
+			if ok and copy then return fixRigRoot(copy) end
 		end
 	end
 	local r6 = not clip or clip:FindFirstChild("Torso", true) ~= nil
@@ -683,7 +700,7 @@ local function makeRig(clip)
 		return Players:CreateHumanoidModelFromDescription(desc,
 			r6 and Enum.HumanoidRigType.R6 or Enum.HumanoidRigType.R15)
 	end)
-	return ok and rig or nil
+	return ok and fixRigRoot(rig) or nil
 end
 
 local function previewAnimation(clip)
@@ -1858,6 +1875,7 @@ local function stopScene()
 	if loaded and loaded.clip then playBtn.Text = "Abspielen" end
 	sceneLabel.TextColor3, sceneLabel.Text = MUTED, "Gestoppt, aufgeräumt."
 end
+plugin.Unloading:Connect(stopScene) -- beim Neuladen des Plugins keinen Dummy im Workspace zurücklassen
 
 -- Objekte, die ein Effekt-Modul benutzt, aus seinem Code lesen statt den Code auszuführen.
 -- Erkennt Pfade wie u5.Whitesnake.DirectOrderThrow, ["Client Assets"]["The World"].X, :WaitForChild("X")
@@ -2110,7 +2128,7 @@ local function startScene(entry, animOnly)
 		sceneLabel.TextColor3, sceneLabel.Text = BAD, "Dummy ließ sich nicht bauen."
 		return
 	end
-	rig.Name = "Vorschau-Dummy"
+	rig.Name, rig.Archivable = "Vorschau-Dummy", false -- nie mit der Place speichern
 	local cf = workspace.CurrentCamera.CFrame
 	local pos = cf.Position + cf.LookVector * 12
 	rig:PivotTo(CFrame.lookAt(pos, Vector3.new(cf.Position.X, pos.Y, cf.Position.Z)))
@@ -2575,7 +2593,8 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 	end
 
 	local function rootOf(m)
-		return m.PrimaryPart or m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("RootPart") or m:FindFirstChildWhichIsA("BasePart")
+		-- HumanoidRootPart vor PrimaryPart: Bei R6 ist PrimaryPart oft der Kopf.
+		return m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("RootPart") or m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
 	end
 
 	-- Teil, dem die Kamera folgt, wie im Spiel: CamPart, sonst Camera, sonst das letzte Teil mit "cam" (Beatdown: camera3).
@@ -2821,7 +2840,10 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 		local function start(rig, a)
 			local holder = holderOf(rig) or rig:FindFirstChildWhichIsA("Humanoid", true)
 			local root = rootOf(rig)
-			if root and rig ~= character then root.Anchored = true end
+			if root and rig ~= character then
+				fixRigRoot(rig, root) -- ein verankerter Kopf oder Arm bliebe sonst stehen
+				root.Anchored = true
+			end
 			local t, animator = nil, nil
 			if holder then t, animator = trackFor(holder, a) end
 			if t then
