@@ -52,7 +52,7 @@ Fenster direkt in Studio mit vier Tabs. Neben jedem Knopf erklärt ein **i**, wa
 - **Herunterladen** speichert nach `downloads/`. Models und VFX bekommen einen Ordner mit `.rbxm` und allen Texturen.
 - **Herunterladen unter meinem Namen** lädt die Texturen erst unter deinem Account hoch und speichert dann mit deinen neuen IDs.
 
-**Bulk:** Viele IDs untereinander, **Liste laden**. Klick auf einen Eintrag zeigt die Vorschau, `+` legt ihn in den Korb.
+**Bulk:** Viele IDs untereinander, **Liste laden**. Klick auf einen Eintrag zeigt die Vorschau oben im Bulk-Tab, `+` legt ihn in den Korb.
 
 **Korb:** Beim Ansehen sammeln, dann **Korb herunterladen** nach `downloads/<Ordnername>/`. **Bilder im Korb hochladen** lädt sie unter deinem Namen hoch.
 

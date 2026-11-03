@@ -236,11 +236,18 @@ idsBox.AutomaticSize, idsBox.Size = Enum.AutomaticSize.Y, UDim2.new(1, 0, 0, 34)
 idsBox.Visible = false
 
 local tabs, pages = {}, {}
+-- Die Vorschau-Karte gibt es einmal; sie wandert zwischen Laden und Bulk (dort oben über der Liste).
+local previewCard, previewOrder, bulkCard, bulkPreviewUsed
 local function showTab(name)
 	for n, page in pages do
 		page.Visible = n == name
 		tabs[n].BackgroundColor3 = n == name and ACCENT or CARD
 		tabs[n].TextColor3 = n == name and Color3.new(1, 1, 1) or MUTED
+	end
+	if previewCard and name == "Laden" then
+		previewCard.Parent, previewCard.LayoutOrder, previewCard.Visible = pages.Laden, previewOrder, true
+	elseif previewCard and name == "Bulk" then
+		previewCard.Parent, previewCard.LayoutOrder, previewCard.Visible = pages.Bulk, bulkCard.LayoutOrder - 1, bulkPreviewUsed == true
 	end
 	root.CanvasPosition = Vector2.zero
 end
@@ -273,7 +280,8 @@ local loadBtn = button("Laden", ACCENT,
 local pickBtn = button("Aus Explorer-Auswahl", BLUE,
 	"Klick im Explorer eine Animation, einen Sound, Emitter, Mesh oder ein Bild an und drück diesen Knopf. Die ID wird automatisch eingetragen und geladen.\n\nIst ein ganzer Ordner (z. B. eine VFX) ausgewählt, kommen alle IDs darin als Liste in den Tab Bulk.")
 
-card("Vorschau")
+previewCard = card("Vorschau")
+previewOrder = previewCard.LayoutOrder
 local view = add(corner(Instance.new("ViewportFrame"), 8))
 view.Size = UDim2.new(1, 0, 0, 240)
 view.BackgroundColor3 = FIELD
@@ -307,14 +315,14 @@ local savedLabel = label("")
 -- Tab: Bulk --------------------------------------------------------------------------------
 
 page("Bulk", 2)
-card("Viele Assets auf einmal", "Eine ID oder ein Link pro Zeile.")
+bulkCard = card("Viele Assets auf einmal", "Eine ID oder ein Link pro Zeile.")
 local bulkBox = input("507766388\n180435571\n...")
 bulkBox.MultiLine, bulkBox.TextWrapped = true, true
 bulkBox.TextYAlignment = Enum.TextYAlignment.Top
 bulkBox.Size = UDim2.new(1, 0, 0, 110)
 bulkBox:FindFirstChildOfClass("UIPadding").PaddingTop = UDim.new(0, 8)
 local bulkBtn = button("Liste laden", ACCENT,
-	"Zeigt zu jeder ID Name und Typ. Das geht schnell, weil noch nichts heruntergeladen wird.\n\nKlick auf einen Eintrag öffnet die Vorschau im Tab Laden. + legt ihn in den Korb.")
+	"Zeigt zu jeder ID Name und Typ. Das geht schnell, weil noch nichts heruntergeladen wird.\n\nKlick auf einen Eintrag zeigt die Vorschau oben in diesem Tab. + legt ihn in den Korb.")
 local bulkAllBtn = button("Ganze Liste in den Korb", GREY, "Legt alle Einträge der Liste auf einmal in den Korb.")
 bulkAllBtn.Visible = false
 -- Bulk-Ergebnisse. Vorschau lädt erst beim Anklicken, sonst laggt Studio bei vielen Assets.
@@ -893,7 +901,8 @@ local function loadBulk()
 		b.Size = UDim2.new(1, -42, 1, 0)
 		b.Activated:Connect(function()
 			idBox.Text = item.id
-			showTab("Laden")
+			bulkPreviewUsed = true
+			showTab("Bulk") -- Vorschau erscheint oben im Bulk-Tab, kein Tabwechsel
 			load(item.id)
 		end)
 		local plus = makeButton("+", GREY)
