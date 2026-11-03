@@ -15,11 +15,13 @@ import urllib.parse
 import urllib.request
 import webbrowser
 import zipfile
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from roblox_asset_downloader import extract_ids, fetch, fetch_many, guess_ext, load_cookie, parse_place
 
 PORT = 8765
+DOWNLOADS = Path(__file__).with_name("downloads")
 ASSET_TYPES = {1: "Image", 2: "T-Shirt", 3: "Audio", 4: "Mesh", 8: "Hat", 10: "Model", 11: "Shirt", 12: "Pants",
                13: "Decal", 24: "Animation", 38: "Plugin", 40: "MeshPart", 41: "Hair", 42: "Face", 43: "Neck",
                44: "Shoulder", 45: "Front", 46: "Back", 47: "Waist", 61: "Emote", 62: "Video"}
@@ -36,8 +38,9 @@ def asset_info(asset_id):
         return "", ""
 
 
-def file_name(asset_id, data):
-    name, _ = asset_info(asset_id)
+def file_name(asset_id, data, name=None):
+    if name is None:
+        name, _ = asset_info(asset_id)
     name = re.sub(r'[\\/:*?"<>|]+', "", name).strip()[:60]
     return f"{name} ({asset_id}).{guess_ext(data)}" if name else f"{asset_id}.{guess_ext(data)}"
 
@@ -73,6 +76,20 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 return self.error(502, err)
             self.send(200, data, "application/octet-stream", file_name(ids[0], data))
+        elif url.path == "/api/plugin":
+            # Für das Studio-Plugin: speichert in downloads/ und liefert die Bytes plus Typ zur Vorschau.
+            ids = extract_ids(q.get("q", [""])[0], bare=True)
+            if not ids:
+                return self.error(400, "Keine gültige Asset-ID gefunden.")
+            data, err = fetch(ids[0], load_cookie(), parse_place(q.get("place", [""])[0]))
+            if err:
+                return self.error(502, err)
+            name, kind = asset_info(ids[0])
+            path = DOWNLOADS / file_name(ids[0], data, name)
+            DOWNLOADS.mkdir(exist_ok=True)
+            path.write_bytes(data)
+            self.send(200, data, "application/octet-stream", path.name,
+                      {"X-Id": ids[0], "X-Type": kind, "X-Ext": guess_ext(data), "X-Saved": urllib.parse.quote(str(path))})
         else:
             self.error(404, "Nicht gefunden")
 

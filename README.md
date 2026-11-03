@@ -37,6 +37,20 @@ Roblox gibt neue Assets nur an eingeloggte Accounts heraus. Das Tool nutzt dafü
 
 Oben auf der Seite steht, ob der Login aktiv ist.
 
+### Roblox Studio Plugin
+
+Kleines Fenster direkt in Studio: Asset laden, Vorschau ansehen, ins Spiel einfügen.
+
+1. `plugin-installieren.bat` doppelklicken und Studio neu starten.
+2. `start.bat` starten. Das Plugin redet mit diesem lokalen Server, er muss laufen.
+3. In Studio: Tab **Plugins** → **Asset Downloader**. Beim ersten Laden fragt Studio, ob das Plugin `127.0.0.1` erreichen darf: **Allow**.
+4. ID oder Link eingeben, **Laden** klicken.
+
+- Models drehen sich in der Vorschau. Maus ziehen dreht, Mausrad zoomt. Animationen laufen auf einem Dummy (R6 oder R15, je nach Animation). Ist ein eigener Rig im Workspace ausgewählt, spielt sie auf dem.
+- **Einfügen** setzt Models in den Workspace. Animationen landen in `AnimSaves` des ausgewählten Rigs (dann öffnet sie der Animation Editor), sonst in `ServerStorage`.
+- Audio, Bilder und Meshes zeigen das Roblox-Vorschaubild.
+- Jede geladene Datei liegt zusätzlich in `downloads/`.
+
 ### Kommandozeile
 
 ```bash
