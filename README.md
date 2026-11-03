@@ -39,19 +39,41 @@ Oben auf der Seite steht, ob der Login aktiv ist.
 
 ### Roblox Studio Plugin
 
-Kleines Fenster direkt in Studio: Asset laden, Vorschau ansehen, ins Spiel einfügen.
+Fenster direkt in Studio mit vier Tabs. Neben jedem Knopf erklärt ein **i**, was er macht.
 
 1. `plugin-installieren.bat` doppelklicken und Studio neu starten.
 2. `start.bat` starten. Das Plugin redet mit diesem lokalen Server, er muss laufen.
 3. In Studio: Tab **Plugins** → **Asset Downloader**. Beim ersten Laden fragt Studio, ob das Plugin `127.0.0.1` erreichen darf: **Allow**.
-4. ID oder Link eingeben, **Laden** klicken.
 
-- Models drehen sich in der Vorschau. Maus ziehen dreht, Mausrad zoomt. Animationen laufen auf einem Dummy (R6 oder R15, je nach Animation). Ist ein eigener Rig im Workspace ausgewählt, spielt sie auf dem.
-- **Einfügen** setzt Models in den Workspace. Animationen landen in `AnimSaves` des ausgewählten Rigs (dann öffnet sie der Animation Editor), sonst in `ServerStorage`.
-- Audio, Bilder und Meshes zeigen das Roblox-Vorschaubild.
-- **Herunterladen** speichert das Asset in `downloads/`.
-- **In den Korb** sammelt Assets, während du dir die Vorschauen ansiehst. **Korb herunterladen** speichert alles in `downloads/<Ordnername>/`.
-- **Bulk:** Viele IDs untereinander einfügen, **Liste laden**. Klick auf einen Eintrag zeigt die Vorschau, `+` legt ihn in den Korb.
+**Laden**
+- ID oder Link eingeben und **Laden**, oder im Explorer etwas anklicken und **Aus Explorer-Auswahl**. Die ID wird dann automatisch übernommen.
+- Vorschau: Models und Meshes drehen sich (Maus ziehen dreht, Mausrad zoomt). Animationen laufen auf einem farbigen Dummy oder dem ausgewählten Rig. Bilder werden angezeigt, Audio hat **Abspielen**.
+- **Platzieren** setzt das Asset vor die Kamera, mit allen Einstellungen. Animationen landen in `AnimSaves` des ausgewählten Rigs, sonst in `ServerStorage`. Bei VFX löst **Abspielen** die Emitter aus.
+- **Herunterladen** speichert nach `downloads/`. Models und VFX bekommen einen Ordner mit `.rbxm` und allen Texturen.
+- **Herunterladen unter meinem Namen** lädt die Texturen erst unter deinem Account hoch und speichert dann mit deinen neuen IDs.
+
+**Bulk:** Viele IDs untereinander, **Liste laden**. Klick auf einen Eintrag zeigt die Vorschau, `+` legt ihn in den Korb.
+
+**Korb:** Beim Ansehen sammeln, dann **Korb herunterladen** nach `downloads/<Ordnername>/`. **Bilder im Korb hochladen** lädt sie unter deinem Namen hoch.
+
+**VFX** (für Effekte, die schon im Spiel sind, z. B. eine Aura): Ordner im Explorer anklicken, dann
+- **Reparieren und sichern**: Texturen unter deinem Namen hochladen, IDs tauschen, alles nach `downloads/<Name>/`.
+- **Nur sichern**: `.rbxm` und Texturen speichern, ohne Hochladen.
+- **Auswahl abspielen**: Emitter auslösen. Lose Attachments kommen dafür an ein unsichtbares Teil.
+
+#### Hochladen unter deinem Namen einrichten (einmalig)
+
+**Reparieren und sichern** und **Unter meinem Namen hochladen** laden Texturen in deinen eigenen Account hoch. Roblox Studio darf das selbst noch nicht, deshalb macht es der Server über die offizielle Open Cloud API. Dafür braucht er einen API-Key von dem Account, unter dessen Namen die Bilder erscheinen sollen.
+
+1. Mit diesem Account auf [create.roblox.com/dashboard/credentials](https://create.roblox.com/dashboard/credentials) gehen → **API-Schlüssel erstellen**.
+2. Unter **Zugriffsberechtigungen** die API **Assets** hinzufügen und **Read** und **Write** anhaken.
+3. Unter **Sicherheit** bei IP-Adressen `0.0.0.0/0` eintragen (oder deine eigene IP). Ablaufdatum nach Wunsch.
+4. **Speichern und Schlüssel generieren**, den Schlüssel kopieren.
+5. Im Editor einfügen und als `apikey.txt` in diesen Ordner speichern (Dateityp: Alle Dateien).
+
+> **Achtung:** Mit dem API-Key kann man in deinem Namen Assets hochladen. Gib ihn niemandem.
+
+In Studio muss derselbe Account eingeloggt sein, denn das Plugin schickt die User-ID von Studio mit.
 
 ### Kommandozeile
 

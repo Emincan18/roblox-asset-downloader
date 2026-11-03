@@ -11,8 +11,11 @@ import csv
 import io
 import json
 import re
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import webbrowser
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +40,75 @@ def asset_info(asset_id):
         return d.get("Name") or "", ASSET_TYPES.get(d.get("AssetTypeId"), "")
     except Exception:
         return "", ""
+
+
+def safe_name(name):
+    return re.sub(r'[\\/:*?"<>|]+', "", name).strip(" .")[:60]  # kein Pfad raus aus downloads/
+
+
+def safe_dir(folder):
+    """downloads/ oder ein Unterordner davon, wird angelegt."""
+    out = DOWNLOADS / safe_name(folder) if safe_name(folder) else DOWNLOADS
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+API_KEY_FILE = Path(__file__).with_name("apikey.txt")
+OPEN_CLOUD = "https://apis.roblox.com/assets/v1/"
+
+
+def open_cloud(path, key, body=None, ctype=None):
+    req = urllib.request.Request(OPEN_CLOUD + path, data=body, headers={"x-api-key": key})
+    if ctype:
+        req.add_header("Content-Type", ctype)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        hint = {401: "API-Key ungültig oder abgelaufen", 403: "API-Key hat keine Assets-Rechte oder falsche IP"}.get(e.code, "")
+        raise RuntimeError(f"Open Cloud HTTP {e.code} {hint}: {e.read().decode('utf-8', 'ignore')[:200]}")
+
+
+def upload_image(asset_id, user_id, place=None):
+    """Lädt ein fremdes Bild herunter und unter dem eigenen Account neu hoch (Open Cloud, apikey.txt).
+    Gibt die neue Bild-ID zurück, die in Texture/Image-Feldern funktioniert."""
+    key = API_KEY_FILE.read_text("utf-8").strip() if API_KEY_FILE.is_file() else ""
+    if not key:
+        raise RuntimeError("apikey.txt fehlt. Siehe README: Hochladen einrichten")
+    data, err = fetch(asset_id, load_cookie(), place)
+    if err:
+        raise RuntimeError(err)
+    ext = guess_ext(data)
+    ctype = {"png": "image/png", "jpg": "image/jpeg"}.get(ext)
+    if not ctype:
+        raise RuntimeError(f"Kein Bild ({ext})")
+    name = safe_name(asset_info(asset_id)[0]) or "Textur"
+    boundary = uuid.uuid4().hex
+    request = json.dumps({"assetType": "Decal", "displayName": name[:50], "description": "Textur",
+                          "creationContext": {"creator": {"userId": str(user_id)}}})
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="request"\r\n\r\n{request}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="fileContent"; filename="textur.{ext}"\r\n'
+            f'Content-Type: {ctype}\r\n\r\n').encode() + data + f"\r\n--{boundary}--\r\n".encode()
+    op = open_cloud("assets", key, body, f"multipart/form-data; boundary={boundary}")
+    for _ in range(20):  # Roblox verarbeitet den Upload asynchron
+        if op.get("done"):
+            break
+        time.sleep(1)
+        op = open_cloud(op["path"], key)
+    if not op.get("done"):
+        raise RuntimeError("Roblox braucht zu lange, gleich nochmal versuchen")
+    decal_id = str(op["response"]["assetId"])
+    # Open Cloud gibt die Decal-ID. Texturen brauchen die Bild-ID darin; die steht im Decal-Asset selbst.
+    for _ in range(5):
+        decal, err = fetch(decal_id, load_cookie())
+        if not err:
+            if guess_ext(decal) in ("png", "jpg"):
+                return decal_id
+            inner = [i for i in extract_ids(decal.decode("latin-1")) if i != decal_id]
+            if inner:
+                return inner[0]
+        time.sleep(2)
+    return decal_id
 
 
 def file_name(asset_id, data, name=None):
@@ -77,6 +149,17 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 return self.error(502, err)
             self.send(200, data, "application/octet-stream", file_name(ids[0], data))
+        elif url.path == "/api/plugin-upload":
+            # Plugin: Textur unter eigenem Namen neu hochladen (Studio selbst darf das noch nicht).
+            ids = extract_ids(q.get("q", [""])[0], bare=True)
+            user = q.get("user", [""])[0]
+            if not ids or not user.isdigit():
+                return self.error(400, "ID oder User fehlt.")
+            try:
+                new_id = upload_image(ids[0], user, parse_place(q.get("place", [""])[0]))
+            except Exception as e:
+                return self.error(502, str(e))
+            self.send(200, json.dumps({"id": new_id}).encode())
         elif url.path == "/api/plugin":
             # Für die Vorschau im Studio-Plugin: liefert Bytes plus Name und Typ, speichert nichts.
             ids = extract_ids(q.get("q", [""])[0], bare=True)
@@ -93,10 +176,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         url = urllib.parse.urlparse(self.path)
-        if url.path not in ("/api/bulk", "/api/plugin-bulk", "/api/plugin-save"):
+        if url.path not in ("/api/bulk", "/api/plugin-bulk", "/api/plugin-save", "/api/plugin-store"):
             return self.error(404, "Nicht gefunden")
         place = parse_place(urllib.parse.parse_qs(url.query).get("place", [""])[0])
         text = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8", "ignore")
+        if url.path == "/api/plugin-store":
+            # Plugin schickt eine ganze VFX/Ordner-Auswahl als .rbxm (hex, weil Luau-Strings sonst nicht binär-sicher ankommen).
+            folder = urllib.parse.parse_qs(url.query).get("folder", [""])[0]
+            try:
+                data = bytes.fromhex(text.strip())
+            except ValueError:
+                return self.error(400, "Datei kaputt angekommen.")
+            path = safe_dir(folder) / f"{safe_name(folder) or 'auswahl'}.rbxm"
+            path.write_bytes(data)
+            return self.send(200, json.dumps({"path": str(path)}).encode())
         ids = extract_ids(text, bare=True)
         if ids and url.path == "/api/plugin-bulk":
             return self.plugin_bulk(ids)
@@ -130,9 +223,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def plugin_save(self, ids, place, folder):
         """Für das Studio-Plugin: Assets in downloads/ oder einen Unterordner davon speichern."""
-        folder = re.sub(r'[\\/:*?"<>|]+', "", folder).strip(" .")[:60]  # kein Pfad raus aus downloads/
-        out = DOWNLOADS / folder if folder else DOWNLOADS
-        out.mkdir(parents=True, exist_ok=True)
+        out = safe_dir(folder)
         results = fetch_many(ids, load_cookie(), place)
         with ThreadPoolExecutor(max_workers=6) as pool:
             names = [n for n, _ in pool.map(asset_info, ids)]
