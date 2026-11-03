@@ -208,7 +208,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(400, "Datei kaputt angekommen.")
             file = safe_name(urllib.parse.parse_qs(url.query).get("file", [""])[0])
             path = safe_dir(folder) / (file or f"{safe_name(folder) or 'auswahl'}.rbxm")
-            path.write_bytes(data)
+            # Große Dateien kommen in Stücken: das erste überschreibt, die weiteren (append=1) hängen an.
+            with open(path, "ab" if urllib.parse.parse_qs(url.query).get("append") else "wb") as f:
+                f.write(data)
             return self.send(200, json.dumps({"path": str(path)}).encode())
         ids = extract_ids(text, bare=True)
         if ids and url.path == "/api/plugin-bulk":
