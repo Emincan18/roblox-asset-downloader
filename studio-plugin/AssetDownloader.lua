@@ -258,7 +258,7 @@ end
 
 local function page(name, index)
 	local t = makeButton(name, CARD)
-	t.Size, t.LayoutOrder, t.TextSize = UDim2.new(1 / 6, -3, 1, 0), index, 11
+	t.Size, t.LayoutOrder, t.TextSize = UDim2.new(1 / 7, -3, 1, 0), index, 11
 	t.Parent = tabBar
 	t.Activated:Connect(function() showTab(name) end)
 	tabs[name] = t
@@ -409,6 +409,191 @@ local csList = add(autoFrame())
 vlist(csList, 4)
 local _, csDownloadBtn, csRepairBtn = buttonRow("Mein Account: lädt vorher jedes Bild der Cutscene (Texturen, Decals, Partikel) unter deinem Account neu hoch, setzt die neuen IDs in die Kopie ein, auch im Script-Code, und lädt dann alles herunter. Braucht apikey.txt. Animationen und Sounds behalten ihre alten IDs, die lädt der Server nicht hoch.\n\nSucht im Code der ausgewählten Scripts alles, was die Cutscene benutzt: Models, Rigs mit AnimationController oder Humanoid, Kameras, Parts, Animationen, Sounds, Remotes und Module. Module, die per require geladen werden, durchsucht es genauso mit.\n\nAlles landet in downloads/<Name>/: <Name>.rbxm mit den Ordnern Code und Objekte (in Studio per Rechtsklick > Insert from File einfügbar), code.lua zum Lesen und jede Animation, jeder Sound und jedes Bild als eigene Datei.\n\nKlick auf eine Zeile in der Liste zeigt das Objekt im Explorer.",
 	"Herunterladen", ACCENT, "Mein Account", PURPLE)
+
+-- Tab: Credits -----------------------------------------------------------------------------
+
+do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze von 200
+	page("Credits", 7)
+	card("Credits entfernen", "Entfernt in der ganzen Place Dekompilier-Hinweise, Discord-Links, Credits und Lizenzen.")
+	local creditsBtn = button("Credits löschen", ACCENT, "Script-Code: löscht jeden Kommentar, in dem Credits, Lizenzen, Discord, Decompiler-Hinweise (Saved by, Script path, Decompile time, -- Line:, -- upvalues:) oder Copyright stehen. Discord-Links in Strings fliegen auch raus. Der restliche Code bleibt, wie er ist.\n\nObjekte (VFX, Models, GUIs): Discord-Links und „Made by …“ aus Namen, Texten und Attributen. StringValues und Scripts, die nur Credits enthalten (Credits, ReadMe, License), werden gelöscht.\n\nZum Bestätigen zweimal klicken. Strg+Z macht alles rückgängig.")
+	local creditsLabel = label("")
+
+	-- Kleingeschrieben gesucht, als Lua-Muster. Ein Treffer in einem Kommentar löscht den ganzen Kommentar.
+	local COMMENT_MARKERS = { "discord", "saved by", "saveinstance", "decompil", "script path:", "filteringenabled",
+		"sourceassetid", "source from the asset", "join to copy", "credit", "made by", "created by", "scripted by",
+		"written by", "modeled by", "author", "©", "copyright", "%(c%) %d", "licen[sc]e", "permission is hereby granted",
+		"all rights reserved", "spdx", "https?://", "original asset", "original module", "^%-%-%s*line: %d", "^%-%-%s*upvalues:", "^%-%-%s*types:" }
+	-- Für Namen, Texte und Werte strenger: dort heißt „Credits“ oft Spielwährung, und „created by your stand“ ist Spieltext.
+	local TEXT_MARKERS = { "discord", "^%s*made by", "^%s*created by", "^%s*scripted by", "^%s*credits? to", "join to copy",
+		"saveinstance", "decompil" }
+	local CREDIT_NAMES = { credits = true, credit = true, readme = true, ["read me"] = true, license = true, licence = true, author = true }
+	local LINKS = { "https?://[%w%.]*discord%.gg/[%w%-_]*", "discord%.gg/[%w%-_]*",
+		"https?://[%w%.]*discord%w*%.com/invite/[%w%-_]*", "discord%w*%.com/invite/[%w%-_]*" }
+
+	local function matchesAny(text, markers)
+		local low = text:lower()
+		for _, m in markers do
+			if low:find(m) then return true end
+		end
+		return false
+	end
+
+	local function stripLinks(text)
+		local count = 0
+		for _, p in LINKS do
+			local n
+			text, n = text:gsub(p, "")
+			count += n
+		end
+		return text, count
+	end
+
+	-- Geht den Code einmal durch, damit -- in einem String nicht als Kommentar zählt. Gibt (Code, Kommentare, Links).
+	local function cleanSource(src)
+		local out, i, n, comments, links = {}, 1, #src, 0, 0
+		local function keep(s)
+			local cleaned, c = stripLinks(s)
+			links += c
+			table.insert(out, cleaned)
+		end
+		while i <= n do
+			local j = src:find("[\"'`%-%[]", i)
+			if not j then table.insert(out, src:sub(i)) break end
+			table.insert(out, src:sub(i, j - 1))
+			local c = src:sub(j, j)
+			if c == '"' or c == "'" or c == "`" then
+				local k = j + 1
+				while k <= n do
+					local d = src:sub(k, k)
+					if d == "\\" then k += 2 elseif d == c or d == "\n" then break else k += 1 end
+				end
+				keep(src:sub(j, k))
+				i = k + 1
+			elseif c == "[" then
+				local eq = src:match("^%[(=*)%[", j)
+				if eq then
+					local _, e = src:find("]" .. eq .. "]", j, true)
+					e = e or n
+					keep(src:sub(j, e))
+					i = e + 1
+				else
+					table.insert(out, c)
+					i = j + 1
+				end
+			elseif src:sub(j, j + 1) == "--" then
+				local eq = src:match("^%-%-%[(=*)%[", j)
+				local e
+				if eq then
+					local _, close = src:find("]" .. eq .. "]", j, true)
+					e = close or n
+				else
+					e = (src:find("\n", j, true) or n + 1) - 1
+				end
+				local comment = src:sub(j, e)
+				if matchesAny(comment, COMMENT_MARKERS) then
+					comments += 1
+					-- Steht der Kommentar allein in seiner Zeile, geht die ganze Zeile samt Umbruch.
+					local ls = j
+					while ls > 1 and src:sub(ls - 1, ls - 1) ~= "\n" do ls -= 1 end
+					local alone = src:sub(ls, j - 1):match("^[ \t]*$") ~= nil
+					out[#out] = out[#out]:gsub("[ \t]*$", "")
+					if alone and src:sub(e + 1, e + 1) == "\n" then e += 1 end
+				else
+					table.insert(out, comment)
+				end
+				i = e + 1
+			else
+				table.insert(out, c)
+				i = j + 1
+			end
+		end
+		return (table.concat(out):gsub("^[ \t\r\n]*\n", "")), comments, links
+	end
+
+	local function cleanPlace()
+		local r = { scripts = 0, comments = 0, links = 0, objects = 0, deleted = 0 }
+		local doomed, all = {}, {}
+		for _, svc in game:GetChildren() do
+			-- CoreGui hält Studios und dieses Plugin-Fenster, das nicht anfassen.
+			local ok, list = pcall(function() return svc.ClassName ~= "CoreGui" and svc:GetDescendants() or {} end)
+			if ok then table.move(list, 1, #list, #all + 1, all) end
+		end
+		for count, obj in all do
+			if count % 500 == 0 then task.wait() end
+			pcall(function()
+				local isCreditName = CREDIT_NAMES[obj.Name:lower()]
+				local changed = false
+				if obj:IsA("LuaSourceContainer") then
+					local src = obj.Source
+					local cleaned, comments, links = cleanSource(src)
+					if isCreditName and not cleaned:find("%S") then
+						table.insert(doomed, obj)
+						return
+					end
+					if cleaned ~= src then
+						-- .Source = geht nur bis 200000 Zeichen, große Module wie FunctionLibrary scheitern sonst still
+						game:GetService("ScriptEditorService"):UpdateSourceAsync(obj, function() return cleaned end)
+						r.scripts += 1
+						r.comments += comments
+						r.links += links
+					end
+				elseif obj:IsA("StringValue") and (isCreditName or matchesAny(obj.Value, TEXT_MARKERS)) then
+					table.insert(doomed, obj)
+					return
+				elseif obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+					if matchesAny(obj.Text, TEXT_MARKERS) then
+						local text = stripLinks(obj.Text)
+						obj.Text = matchesAny(text, TEXT_MARKERS) and "" or text
+						changed = true
+					end
+				end
+				if matchesAny(obj.Name, TEXT_MARKERS) then
+					local name = stripLinks(obj.Name)
+					obj.Name = (name:find("%S") and not matchesAny(name, TEXT_MARKERS)) and name or obj.ClassName
+					changed = true
+				end
+				for key, value in obj:GetAttributes() do
+					if CREDIT_NAMES[key:lower()] or (type(value) == "string" and matchesAny(value, TEXT_MARKERS)) then
+						obj:SetAttribute(key, nil)
+						changed = true
+					end
+				end
+				if changed then r.objects += 1 end
+			end)
+		end
+		for _, obj in doomed do
+			if pcall(obj.Destroy, obj) then r.deleted += 1 end
+		end
+		return r
+	end
+
+	local creditsConfirmUntil = 0
+	creditsBtn.Activated:Connect(function()
+		if RunService:IsRunning() then
+			creditsLabel.TextColor3, creditsLabel.Text = BAD, "Erst den Play-Test beenden."
+			return
+		end
+		if os.clock() > creditsConfirmUntil then
+			creditsConfirmUntil = os.clock() + 5
+			creditsBtn.Text = "Sicher? Nochmal klicken"
+			task.delay(5, function() creditsBtn.Text = "Credits löschen" end)
+			return
+		end
+		creditsConfirmUntil = 0
+		creditsBtn.Active, creditsBtn.Text = false, "Lösche …"
+		local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: Credits löschen")
+		local ok, r = pcall(cleanPlace)
+		if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+		creditsBtn.Active, creditsBtn.Text = true, "Credits löschen"
+		if ok then
+			creditsLabel.TextColor3 = OK
+			creditsLabel.Text = ("%d Scripts bereinigt (%d Kommentare, %d Links), %d Objekte geändert, %d gelöscht. Strg+Z macht es rückgängig.")
+				:format(r.scripts, r.comments, r.links, r.objects, r.deleted)
+		else
+			creditsLabel.TextColor3, creditsLabel.Text = BAD, "Fehler: " .. tostring(r)
+		end
+	end)
+end
 
 showTab("Laden")
 container = root
@@ -1999,23 +2184,53 @@ plugin.Unloading:Connect(stopScene)
 -- Was ein Cutscene-Script braucht, steht in seinem Code: Pfade zu Objekten, require(...) auf Module und
 -- Asset-IDs. Gesucht wird wie bei den Effekten, aber jede Objektart zählt und Module werden mit durchsucht.
 do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze von 200
-	local CUTSCENE_MAX_DESCENDANTS = 2000 -- ganze Maps nicht mitnehmen, Cutscene-Sets schon
+	local CUTSCENE_MAX_DESCENDANTS = 10000 -- obere Grenze, auch wenn der Code ein Objekt ganz braucht
 	local CUTSCENE_MAX_DEPTH = 4 -- require-Ketten so tief verfolgen
+	local CUTSCENE_STORE_SIZE = 300 -- größere Objekte nur, wenn der Code sie ganz braucht (sonst Lager wie Anims, Sounds)
+	local CUTSCENE_LIBRARY_USERS = 3 -- ab so vielen anderen Scripts, die ein Modul laden, ist es eine Bibliothek
+	-- Code braucht ein Objekt ganz, wenn er es klont, durchläuft, umhängt oder mit einem Variablennamen darin sucht.
+	-- Feste Namen in FindFirstChild("x") und ["x"] hat normalize() schon zu .x gemacht, was übrig bleibt, ist dynamisch.
+	local WHOLE_USES = { ":GetChildren", ":GetDescendants", ":Clone", ":FindFirstChild", ":WaitForChild", "%[", "%.Parent%s*=[^=]" }
 
-	local function anyInstance(obj)
-		return not obj:IsA("LuaSourceContainer") or obj:IsA("ModuleScript")
+	local function usedWhole(obj, text, alias)
+		local token = obj.Name:gsub(" ", "\1")
+		local names = { token }
+		for name, target in alias do
+			if target == token then table.insert(names, name) end
+		end
+		for _, n in names do
+			local p = "%f[%w_\1]" .. (n:gsub("[^%w_\1]", "%%%0")) .. "%f[^%w_\1]"
+			for _, use in WHOLE_USES do
+				if text:find(p .. use) then return true end
+			end
+		end
+		return false
 	end
 
 	local function indexAll()
-		local byName = {}
+		local byName, sources = {}, {}
 		for _, obj in game:GetDescendants() do
 			local ok, name = pcall(function() return obj.Name end)
 			if ok then
 				byName[name] = byName[name] or {}
 				table.insert(byName[name], obj)
 			end
+			local okSrc, src = pcall(function() return obj:IsA("LuaSourceContainer") and obj.Source end)
+			if okSrc and src then sources[obj] = src end
 		end
-		return byName
+		return byName, sources
+	end
+
+	-- FindFirstChild(Name) mit Name = script.Name wird zum echten Namen, sonst käme der ganze Ordner aller Varianten mit.
+	local function withScriptName(src, name)
+		local vars = { "script%.Name" }
+		for v in src:gmatch("local ([%w_]+) = script%.Name%s") do table.insert(vars, v) end
+		local function literal() return ('["%s"]'):format(name) end
+		for _, v in vars do
+			src = src:gsub(":FindFirstChild%(" .. v .. "%)", literal):gsub(":WaitForChild%(" .. v .. "%)", literal)
+				:gsub("%[" .. v .. "%]", literal)
+		end
+		return src
 	end
 
 	local function cutsceneScripts()
@@ -2034,10 +2249,24 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 	end
 
 	-- Gibt Scripts (Auswahl plus benutzte Module), Objekte und Asset-IDs zurück.
+	-- Bibliotheken (FunctionLibrary & Co.) kommen nur als Code mit: ihre Objekte gehören zum ganzen Spiel.
 	local function cutsceneDeps(selected)
-		local byName = indexAll()
+		local byName, sources = indexAll()
+		local selectedSet = {}
+		for _, s in selected do selectedSet[s] = true end
+		-- shortcut: zählt Scripts, in denen Modulname und "require" vorkommen, nicht echte require-Aufrufe
+		local function isLibrary(module)
+			local users = 0
+			for s, src in sources do
+				if s ~= module and not selectedSet[s] and src:find(module.Name, 1, true) and src:find("require", 1, true) then
+					users += 1
+					if users >= CUTSCENE_LIBRARY_USERS then return true end
+				end
+			end
+			return false
+		end
 		local scripts, objects, ids = {}, {}, {}
-		local seenScript, seenObj, seenId = {}, {}, {}
+		local seenScript, seenObj, seenId, libSet = {}, {}, {}, {}
 		local function addId(id)
 			if #id >= 5 and not seenId[id] then
 				seenId[id] = true
@@ -2045,22 +2274,35 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			end
 		end
 		local queue = {}
-		for _, s in selected do table.insert(queue, { s, 0 }) end
+		for _, s in selected do table.insert(queue, { s, 0, false }) end
 		while #queue > 0 do
-			local s, depth = table.unpack(table.remove(queue, 1))
+			local s, depth, lib = table.unpack(table.remove(queue, 1))
 			if not seenScript[s] then
 				seenScript[s] = true
 				table.insert(scripts, s)
-				local ok, src = pcall(function() return s.Source end)
-				src = ok and src or ""
-				for id in src:gmatch("rbxassetid://(%d+)") do addId(id) end
-				for id in src:gmatch("[?&][iI][dD]=(%d+)") do addId(id) end
-				for id in src:gmatch("[Ii]d%s*=%s*(%d+)") do addId(id) end -- AnimationId = 123, SoundId = 123
+				libSet[s] = lib or nil
+				local src = withScriptName(sources[s] or "", s.Name)
+				if not lib then
+					for id in src:gmatch("rbxassetid://(%d+)") do addId(id) end
+					for id in src:gmatch("[?&][iI][dD]=(%d+)") do addId(id) end
+					for id in src:gmatch("[Ii]d%s*=%s*(%d+)") do addId(id) end -- AnimationId = 123, SoundId = 123
+				end
+				local text, alias = normalize(src), {}
+				for name, rhs in text:gmatch("local ([%w_]+) = ([^\n]+)") do
+					alias[name] = rhs:match("([%w_\1]+)%s*%)*%s*$")
+				end
+				local function accept(obj)
+					if obj:IsA("LuaSourceContainer") then return obj:IsA("ModuleScript") end
+					if lib then return false end -- Bibliotheken: nur ihre Module zählen
+					return #obj:GetDescendants() <= CUTSCENE_STORE_SIZE or usedWhole(obj, text, alias)
+				end
 				local entry = { name = s.Name, script = s, line = 1, text = src, source = src }
-				for _, obj in effectObjects(entry, byName, anyInstance, CUTSCENE_MAX_DESCENDANTS) do
+				for _, obj in effectObjects(entry, byName, accept, CUTSCENE_MAX_DESCENDANTS) do
 					if obj:IsA("ModuleScript") then
-						if depth < CUTSCENE_MAX_DEPTH then table.insert(queue, { obj, depth + 1 }) end
-					elseif not seenObj[obj] then
+						if depth < CUTSCENE_MAX_DEPTH and not seenScript[obj] then
+							table.insert(queue, { obj, depth + 1, lib or isLibrary(obj) })
+						end
+					elseif not lib and not seenObj[obj] then
 						seenObj[obj] = true
 						table.insert(objects, obj)
 					end
@@ -2077,7 +2319,7 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			if not inside then table.insert(top, obj) end
 		end
 		for _, id in idsIn(top) do addId(id) end
-		return scripts, top, ids
+		return scripts, top, ids, libSet
 	end
 
 	local csCurrent = nil -- { scripts, objects, ids }
@@ -2092,7 +2334,7 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			csInfo.TextColor3, csInfo.Text = MUTED, "Kein Script ausgewählt. Cutscene-Script oder seinen Ordner im Explorer anklicken."
 			return
 		end
-		local scripts, objects, ids = cutsceneDeps(selected)
+		local scripts, objects, ids, libSet = cutsceneDeps(selected)
 		csCurrent = { scripts = scripts, objects = objects, ids = ids }
 		csInfo.TextColor3 = TEXT
 		csInfo.Text = ("%d Scripts (davon %d Module über require), %d Objekte, %d Asset-IDs.")
@@ -2105,7 +2347,9 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			b.LayoutOrder = order
 			if obj then b.Activated:Connect(function() Selection:Set({ obj }) end) end
 		end
-		for _, s in scripts do row(("%s  ·  %s"):format(s.Name, s.ClassName), s) end
+		for _, s in scripts do
+			row(("%s  ·  %s%s"):format(s.Name, s.ClassName, libSet[s] and ", Bibliothek: nur Code" or ""), s)
+		end
 		for _, obj in objects do
 			local rig = obj:FindFirstChildWhichIsA("AnimationController", true) or obj:FindFirstChildWhichIsA("Humanoid", true)
 			row(("%s  ·  %s%s"):format(obj:GetFullName(), obj.ClassName, rig and ", Rig" or ""), obj)
@@ -2146,7 +2390,10 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			for _, s in pack:GetDescendants() do
 				if s:IsA("LuaSourceContainer") then
 					pcall(function()
-						s.Source = s.Source:gsub("rbxassetid://(%d+)", function(id) return map[id] and ("rbxassetid://" .. map[id]) end)
+						-- UpdateSourceAsync statt .Source =, das geht nur bis 200000 Zeichen
+						game:GetService("ScriptEditorService"):UpdateSourceAsync(s, function(old)
+							return (old:gsub("rbxassetid://(%d+)", function(id) return map[id] and ("rbxassetid://" .. map[id]) end))
+						end)
 					end)
 				end
 			end
