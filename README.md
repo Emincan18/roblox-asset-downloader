@@ -104,6 +104,7 @@ Lädt alles nach `downloads/`. Mit `-o ORDNER` kannst du einen anderen Zielordne
 - Dateien heißen `Name (ID).endung`. Die Endung wird am Inhalt erkannt (`.rbxm`, `.rbxmx`, `.ogg`, `.mp3`, `.png`, `.mesh` …).
 - Viele Animationen und Sounds gibt Roblox nur im Kontext des Spiels heraus, das sie benutzen darf. Das Tool probiert automatisch die Spiele des Erstellers, bei Gruppen auch private Test-Places, bei Usern auch die Spiele ihrer eigenen Gruppen. Klappt es über ein Spiel, merkt es sich das in `places.txt` und nutzt es für alle weiteren Assets. Beim Bulk-Download bekommen Fehlschläge deshalb eine zweite Runde.
 - Wenn trotzdem „Kein Zugriff“ kommt: Im Feld **Spiel** den Link des Spiels einfügen, aus dem die IDs stammen (Kommandozeile: `--place LINK`).
+- „Privates Audio“ heißt, der Ersteller hat das Audio privat gestellt. Roblox gibt es nur ihm oder Spielen, die er freigegeben hat, auch im Spielkontext nicht. Das lässt sich nicht herunterladen.
 - „Von Roblox nicht freigegeben (moderiert)“ heißt, Roblox hat das Asset gesperrt. Das kann niemand mehr herunterladen.
 - Binäre `.rbxm`/`.rbxl`-Dateien kann der ID-Extractor nicht lesen. In Studio als `.rbxmx`/`.rbxlx` speichern.
 

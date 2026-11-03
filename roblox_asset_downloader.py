@@ -132,6 +132,7 @@ def creator_places(asset_id):
 
 PLACES_FILE = Path(__file__).with_name("places.txt")
 NOT_APPROVED = "Von Roblox nicht freigegeben (moderiert)"
+PRIVATE_AUDIO = "Privates Audio"
 
 
 def load_places():
@@ -177,6 +178,12 @@ def fetch(asset_id, cookie, place_id=None):
                 if not retry_error:
                     remember_place(place)
                     return data, None
+        details = get_json(f"https://economy.roblox.com/v2/assets/{asset_id}/details") or {}
+        if details.get("AssetTypeId") == 3:
+            # Private Audios gibt Roblox auch im Spielkontext nicht heraus, nur dem Besitzer und freigegebenen Spielen.
+            # Fängt bewusst nicht mit "Kein Zugriff" an, sonst bekäme es im Bulk eine sinnlose zweite Runde.
+            return None, (f"{PRIVATE_AUDIO} (Ersteller: {(details.get('Creator') or {}).get('Name', '?')}). "
+                          "Roblox gibt es nur dem Besitzer oder Spielen, die er freigegeben hat.")
         if place_id is None:
             error += ". Tipp: Link des Spiels angeben, aus dem die ID stammt."
     return data, error
