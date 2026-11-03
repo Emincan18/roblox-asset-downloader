@@ -355,7 +355,7 @@ local repairBtn = button("Reparieren und sichern", PURPLE,
 local saveSelBtn = button("Nur sichern (nichts hochladen)", GREY,
 	"Speichert die Auswahl als .rbxm und alle Texturen als Bilder nach downloads/<Name>/. Lädt nichts hoch, die IDs bleiben die alten.")
 local playSelBtn = button("Auswahl abspielen", BLUE,
-	"Löst alle ParticleEmitter der Auswahl einmal aus (mit EmitCount und EmitDelay, falls gesetzt). Hit-VFX sieht man sonst nicht, weil sie nur per Script feuern.\n\nLose Attachments ohne Part spielen als Kopie an einem unsichtbaren Teil vor dir. Das Original bleibt unverändert, du kannst beliebig oft abspielen.")
+	"Löst alle ParticleEmitter der Auswahl einmal aus (mit EmitCount und EmitDelay, falls gesetzt). Hit-VFX sieht man sonst nicht, weil sie nur per Script feuern.\n\nSpielt immer als Kopie 12 Studs vor deiner Kamera, egal ob die VFX im Workspace, in ReplicatedStorage oder in einem Script liegt. Das Original bleibt unverändert, du kannst beliebig oft abspielen.")
 local vfxLabel = label("")
 
 -- Tab: ClientFX ----------------------------------------------------------------------------
@@ -701,9 +701,8 @@ local function emitVfx()
 	emitIn(loaded.placed)
 end
 
--- Auswahl im Workspace abspielen. Attachments und Emitter ohne Part zeigen nichts,
--- deshalb kommen KOPIEN davon an ein unsichtbares Halter-Part vor der Kamera. Das Original bleibt,
--- wo es ist, sonst wäre die VFX nach dem ersten Abspielen aus ihrem Ordner/Script verschwunden.
+-- Auswahl abspielen. Attachments und Emitter ohne Part zeigen nichts, deshalb hängen sie
+-- in der Kopie an einem unsichtbaren Halter-Part.
 local function isLoose(obj)
 	return (obj:IsA("Attachment") and not obj.Parent:IsA("BasePart"))
 		or ((obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam"))
@@ -716,58 +715,51 @@ local function playSelection(outLabel)
 		outLabel.TextColor3, outLabel.Text = BAD, "Erst die VFX im Explorer anklicken."
 		return
 	end
-	local holder, moved, roots, extra = nil, 0, {}, {}
+	-- Immer eine Kopie 12 Studs vor der Kamera: Die VFX muss weder im Workspace liegen,
+	-- noch muss man zu ihr hinfliegen. Archivable = false, damit nichts davon gespeichert wird.
+	local camCf = workspace.CurrentCamera.CFrame
+	local cf = CFrame.new(camCf.Position + camCf.LookVector * 12)
+	local preview = Instance.new("Model")
+	preview.Name, preview.Archivable = "VFX Vorschau", false
+	local holder = Instance.new("Part")
+	holder.Name, holder.Anchored, holder.CanCollide, holder.CanQuery = "Halter", true, false, false
+	holder.Transparency, holder.Size, holder.CFrame = 1, Vector3.one, cf
+	local parts = Instance.new("Model")
+	parts.Name = "Kopien"
 	for _, root in sel do
-		local hasLoose = isLoose(root)
-		for _, d in root:GetDescendants() do
-			hasLoose = hasLoose or isLoose(d)
-		end
-		if not hasLoose then
-			table.insert(roots, root)
-			continue
-		end
-		-- Emitter an Parts im Original feuern weiter dort, gezählt wird nur die Kopie.
-		if root:IsDescendantOf(workspace) then table.insert(extra, root) end
-		if not holder then
-			local camCf = workspace.CurrentCamera.CFrame
-			holder = Instance.new("Part")
-			holder.Name, holder.Anchored, holder.CanCollide = "VFX Vorschau", true, false
-			holder.Transparency, holder.Size, holder.Archivable = 1, Vector3.one, false
-			holder.CFrame = CFrame.new(camCf.Position + camCf.LookVector * 12)
-			holder.Parent = workspace
-		end
 		-- Ganzes Objekt kopieren, damit Beams und Trails ihre Attachments in der Kopie behalten.
 		local copy = root:Clone()
 		if not copy then continue end -- Archivable = false lässt sich nicht kopieren
 		if isLoose(root) then
 			copy.Parent = holder
-			moved += 1
 			continue
 		end
-		for _, obj in copy:GetDescendants() do
-			if isLoose(obj) then
+		copy.Parent = parts
+		local list = copy:GetDescendants()
+		table.insert(list, 1, copy)
+		for _, obj in list do
+			if obj:IsA("BasePart") then
+				obj.Anchored, obj.CanCollide = true, false
+			elseif obj ~= copy and isLoose(obj) then
 				obj.Parent = holder
-				moved += 1
 			end
 		end
-		copy:Destroy()
 	end
-	if holder then table.insert(roots, holder) end
-	local n = emitIn(roots)
-	emitIn(extra)
-	if holder then
-		-- Kopie wieder weg, wenn die letzten Partikel verschwunden sind.
-		local life = 1
-		for _, e in holder:GetDescendants() do
-			if e:IsA("ParticleEmitter") then
-				life = math.max(life, (tonumber(e:GetAttribute("EmitDelay")) or 0) + e.Lifetime.Max)
-			end
+	if parts:FindFirstChildWhichIsA("BasePart", true) then parts:PivotTo(cf) end
+	parts.Parent, holder.Parent = preview, preview
+	preview.Parent = workspace
+	local n = emitIn({ preview })
+	-- Kopie wieder weg, wenn die letzten Partikel verschwunden sind.
+	local life = 3
+	for _, e in preview:GetDescendants() do
+		if e:IsA("ParticleEmitter") then
+			life = math.max(life, (tonumber(e:GetAttribute("EmitDelay")) or 0) + e.Lifetime.Max)
 		end
-		task.delay(math.min(life + 1, 30), function() holder:Destroy() end)
 	end
+	task.delay(math.min(life + 1, 30), function() preview:Destroy() end)
 	outLabel.TextColor3 = n > 0 and OK or BAD
 	outLabel.Text = n == 0 and "In der Auswahl sind keine ParticleEmitter."
-		or ("%d Emitter ausgelöst.%s"):format(n, moved > 0 and " Lose Teile spielen als Kopie vor deiner Kamera, das Original bleibt unverändert." or "")
+		or ("%d Emitter ausgelöst. Spielt als Kopie vor deiner Kamera, das Original bleibt unverändert."):format(n)
 end
 
 local cart, bulkItems = {}, {}
