@@ -70,12 +70,59 @@ def open_cloud(path, key, body=None, ctype=None):
         raise RuntimeError(f"Open Cloud HTTP {e.code} {hint}: {e.read().decode('utf-8', 'ignore')[:200]}")
 
 
-def upload_image(asset_id, user_id, place=None):
-    """Lädt ein fremdes Bild herunter und unter dem eigenen Account neu hoch (Open Cloud, apikey.txt).
-    Gibt die neue Bild-ID zurück, die in Texture/Image-Feldern funktioniert."""
+def create_asset(asset_type, name, data, filename, ctype, user_id):
+    """Lädt Bytes per Open Cloud (apikey.txt) unter dem eigenen Account hoch. Gibt die neue Asset-ID."""
     key = API_KEY_FILE.read_text("utf-8").strip() if API_KEY_FILE.is_file() else ""
     if not key:
         raise RuntimeError("apikey.txt fehlt. Siehe README: Hochladen einrichten")
+    boundary = uuid.uuid4().hex
+    request = json.dumps({"assetType": asset_type, "displayName": name[:50], "description": asset_type,
+                          "creationContext": {"creator": {"userId": str(user_id)}}})
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="request"\r\n\r\n{request}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="fileContent"; filename="{filename}"\r\n'
+            f'Content-Type: {ctype}\r\n\r\n').encode() + data + f"\r\n--{boundary}--\r\n".encode()
+    op = open_cloud("assets", key, body, f"multipart/form-data; boundary={boundary}")
+    for _ in range(30):  # Roblox verarbeitet den Upload asynchron
+        if op.get("done"):
+            break
+        time.sleep(1)
+        op = open_cloud(op["path"], key)
+    if not op.get("done"):
+        raise RuntimeError("Roblox braucht zu lange, gleich nochmal versuchen")
+    if "response" not in op:
+        raise RuntimeError(f"Roblox hat den Upload abgelehnt: {json.dumps(op.get('error', op))[:200]}")
+    return str(op["response"]["assetId"])
+
+
+# Schon hochgeladene Animationen (alte ID -> neue ID je User), damit nichts doppelt hochgeladen wird.
+UPLOADS_FILE = Path(__file__).with_name("uploads.json")
+
+
+def upload_animation(asset_id, user_id, place=None, name=""):
+    """Lädt eine fremde Animation herunter und als eigene Animation neu hoch. Gibt die neue ID."""
+    try:
+        done = json.loads(UPLOADS_FILE.read_text("utf-8"))
+    except (OSError, ValueError):
+        done = {}
+    cache_key = f"{user_id}:{asset_id}"
+    if cache_key in done:
+        return done[cache_key]
+    data, err = fetch(asset_id, load_cookie(), place)
+    if err:
+        raise RuntimeError(err)
+    ext = guess_ext(data)
+    if ext not in ("rbxm", "rbxmx"):
+        raise RuntimeError(f"Keine Animation ({ext})")
+    title = safe_name(name) or safe_name(asset_info(asset_id)[0]) or "Animation"
+    new_id = create_asset("Animation", title, data, f"animation.{ext}", "model/x-rbxm", user_id)
+    done[cache_key] = new_id
+    UPLOADS_FILE.write_text(json.dumps(done, indent=1), "utf-8")
+    return new_id
+
+
+def upload_image(asset_id, user_id, place=None):
+    """Lädt ein fremdes Bild herunter und unter dem eigenen Account neu hoch (Open Cloud, apikey.txt).
+    Gibt die neue Bild-ID zurück, die in Texture/Image-Feldern funktioniert."""
     data, err = fetch(asset_id, load_cookie(), place)
     if err:
         raise RuntimeError(err)
@@ -84,21 +131,7 @@ def upload_image(asset_id, user_id, place=None):
     if not ctype:
         raise RuntimeError(f"Kein Bild ({ext})")
     name = safe_name(asset_info(asset_id)[0]) or "Textur"
-    boundary = uuid.uuid4().hex
-    request = json.dumps({"assetType": "Decal", "displayName": name[:50], "description": "Textur",
-                          "creationContext": {"creator": {"userId": str(user_id)}}})
-    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="request"\r\n\r\n{request}\r\n'
-            f'--{boundary}\r\nContent-Disposition: form-data; name="fileContent"; filename="textur.{ext}"\r\n'
-            f'Content-Type: {ctype}\r\n\r\n').encode() + data + f"\r\n--{boundary}--\r\n".encode()
-    op = open_cloud("assets", key, body, f"multipart/form-data; boundary={boundary}")
-    for _ in range(20):  # Roblox verarbeitet den Upload asynchron
-        if op.get("done"):
-            break
-        time.sleep(1)
-        op = open_cloud(op["path"], key)
-    if not op.get("done"):
-        raise RuntimeError("Roblox braucht zu lange, gleich nochmal versuchen")
-    decal_id = str(op["response"]["assetId"])
+    decal_id = create_asset("Decal", name, data, f"textur.{ext}", ctype, user_id)
     # Open Cloud gibt die Decal-ID. Texturen brauchen die Bild-ID darin; die steht im Decal-Asset selbst.
     for _ in range(5):
         decal, err = fetch(decal_id, load_cookie())
@@ -168,6 +201,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(400, "ID oder User fehlt.")
             try:
                 new_id = upload_image(ids[0], user, parse_place(q.get("place", [""])[0]))
+            except Exception as e:
+                return self.error(502, str(e))
+            self.send(200, json.dumps({"id": new_id}).encode())
+        elif url.path == "/api/plugin-upload-anim":
+            # Plugin: Animation unter eigenem Account neu hochladen. name = Name des Animation-Objekts.
+            ids = extract_ids(q.get("q", [""])[0], bare=True)
+            user = q.get("user", [""])[0]
+            if not ids or not user.isdigit():
+                return self.error(400, "ID oder User fehlt.")
+            try:
+                new_id = upload_animation(ids[0], user, parse_place(q.get("place", [""])[0]), q.get("name", [""])[0])
             except Exception as e:
                 return self.error(502, str(e))
             self.send(200, json.dumps({"id": new_id}).encode())

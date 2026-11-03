@@ -360,11 +360,18 @@ local playSelBtn = button("Auswahl abspielen", BLUE,
 	"Löst alle ParticleEmitter der Auswahl einmal aus (mit EmitCount und EmitDelay, falls gesetzt). Hit-VFX sieht man sonst nicht, weil sie nur per Script feuern.\n\nSpielt immer als Kopie 12 Studs vor deiner Kamera, egal ob die VFX im Workspace, in ReplicatedStorage oder in einem Script liegt. Das Original bleibt unverändert, du kannst beliebig oft abspielen.")
 local vfxLabel = label("")
 
+card("Animations-Ordner", "Ordner mit Animationen im Explorer anklicken, z. B. Anubis mit Abilities und Attack.")
+-- Eine Tabelle statt mehrerer locals: Luau erlaubt höchstens 200 lokale Variablen pro Funktion.
+local animUi = {}
+animUi.row, animUi.save, animUi.upload = buttonRow("Herunterladen speichert die Auswahl als eine Datei nach downloads/<Name>/<Name>.rbxm, mit allen Unterordnern und Namen genau wie im Explorer (z. B. Anubis > Abilities > Barrage, Anubis > Attack > M1).\n\nJede Animation bekommt ihre KeyframeSequence mit in die Datei. So kannst du sie in jeder Place ansehen und im Animation Editor öffnen, auch wenn Roblox die Original-ID dort sperrt.\n\nUnter meiner ID macht dasselbe, lädt aber vorher jede Animation unter deinem Account hoch (und Bilder, falls welche drin sind) und setzt die neuen IDs in die Datei ein. Dann laufen die Animationen in deinen eigenen Spielen. Datei: downloads/<Name> (meine IDs)/. Schon hochgeladene Animationen werden nicht doppelt hochgeladen. Braucht apikey.txt mit Assets Read + Write.\n\nIn der anderen Place: Rechtsklick > Insert from File und die .rbxm wählen.",
+	"Herunterladen", GREEN, "Unter meiner ID", PURPLE)
+animUi.label = label("")
+
 card("Zu anderer Place", "Auswahl in einer Place senden, in einer anderen Place empfangen. Beide brauchen dieses Plugin und start.bat.")
-local _, sendBtn, receiveBtn = buttonRow("Senden speichert die Explorer-Auswahl beim lokalen Server (downloads/_senden/), mit dem Ordner, in dem jedes Objekt lag.\n\nEmpfangen in der anderen Place legt alles wieder in denselben Ordner, z. B. ReplicatedStorage > Anims. Fehlt der Ordner dort, landet es im nächsten vorhandenen Ordner darüber. Danach ist es ausgewählt, Strg+Z macht es rückgängig.\n\nGesendet bleibt gesendet, bis du etwas Neues sendest. Du kannst also in mehreren Places empfangen.",
-	"Auswahl senden", ACCENT, "Hier empfangen", GREEN)
-local _, sendPlaceBtn, receivePlaceBtn = buttonRow("Ganze Place senden nimmt alles mit: Workspace (mit Terrain), Lighting, ReplicatedFirst, ReplicatedStorage, ServerScriptService, ServerStorage, StarterGui, StarterPack, StarterPlayer, SoundService, Teams, Chat, TextChatService und MaterialService, samt Scripts. Dazu die Einstellungen von Lighting (Uhrzeit, Nebel, Farben …), Workspace (Schwerkraft …) und StarterPlayer (Laufen, Springen, Kamera).\n\nGanze Place empfangen ERSETZT den Inhalt dieser Place durch die gesendete. Deshalb zweimal klicken. Strg+Z macht es rückgängig.\n\nNur außerhalb vom Play-Test.",
-	"Place senden", ACCENT, "Place empfangen", BAD)
+local sendBtn, receiveBtn = select(2, buttonRow("Senden speichert die Explorer-Auswahl beim lokalen Server (downloads/_senden/), mit dem Ordner, in dem jedes Objekt lag.\n\nEmpfangen in der anderen Place legt alles wieder in denselben Ordner, z. B. ReplicatedStorage > Anims. Fehlt der Ordner dort, landet es im nächsten vorhandenen Ordner darüber. Danach ist es ausgewählt, Strg+Z macht es rückgängig.\n\nGesendet bleibt gesendet, bis du etwas Neues sendest. Du kannst also in mehreren Places empfangen.",
+	"Auswahl senden", ACCENT, "Hier empfangen", GREEN))
+local sendPlaceBtn, receivePlaceBtn = select(2, buttonRow("Ganze Place senden nimmt alles mit: Workspace (mit Terrain), Lighting, ReplicatedFirst, ReplicatedStorage, ServerScriptService, ServerStorage, StarterGui, StarterPack, StarterPlayer, SoundService, Teams, Chat, TextChatService und MaterialService, samt Scripts. Dazu die Einstellungen von Lighting (Uhrzeit, Nebel, Farben …), Workspace (Schwerkraft …) und StarterPlayer (Laufen, Springen, Kamera).\n\nGanze Place empfangen ERSETZT den Inhalt dieser Place durch die gesendete. Deshalb zweimal klicken. Strg+Z macht es rückgängig.\n\nNur außerhalb vom Play-Test.",
+	"Place senden", ACCENT, "Place empfangen", BAD))
 local transferLabel = label("")
 
 -- Tab: ClientFX ----------------------------------------------------------------------------
@@ -396,8 +403,8 @@ label("1. Optional: Animation im Tab Laden oder Bulk laden.\n2. Effekt-Namen tip
 local sceneFxBox = input("Effekt suchen, z. B. Barrage")
 local sceneFxList = add(autoFrame())
 vlist(sceneFxList, 4)
-local _, sceneStartBtn, sceneStopBtn = buttonRow("Der Effekt-Code wird nicht ausgeführt: In Kopien fehlen ihm die Daten vom Server, deshalb bricht er fast immer ab.\n\nStattdessen liest das Plugin im Code, welche Objekte der Effekt benutzt (z. B. Client Assets > Whitesnake > DirectOrderThrow), setzt Kopien davon an den Dummy und löst ihre Partikel aus, mit EmitCount und EmitDelay.\n\nDu siehst Partikel, Modelle, Beams und Trails. Bewegungen, die der Code macht (fliegende Fäuste, Tweens), siehst du nicht.\n\nStart spielt den letzten Effekt nochmal. Stopp löscht Dummy und Kopien.",
-	"Start", ACCENT, "Stopp", GREY)
+local sceneStartBtn, sceneStopBtn = select(2, buttonRow("Der Effekt-Code wird nicht ausgeführt: In Kopien fehlen ihm die Daten vom Server, deshalb bricht er fast immer ab.\n\nStattdessen liest das Plugin im Code, welche Objekte der Effekt benutzt (z. B. Client Assets > Whitesnake > DirectOrderThrow), setzt Kopien davon an den Dummy und löst ihre Partikel aus, mit EmitCount und EmitDelay.\n\nDu siehst Partikel, Modelle, Beams und Trails. Bewegungen, die der Code macht (fliegende Fäuste, Tweens), siehst du nicht.\n\nStart spielt den letzten Effekt nochmal. Stopp löscht Dummy und Kopien.",
+	"Start", ACCENT, "Stopp", GREY))
 local sceneLabel = label("")
 
 -- Tab: Cutscene ----------------------------------------------------------------------------
@@ -407,8 +414,8 @@ card("Cutscene", "Cutscene-Script im Explorer anklicken (oder den Ordner, in dem
 local csInfo = label("Noch nichts ausgewählt.")
 local csList = add(autoFrame())
 vlist(csList, 4)
-local _, csDownloadBtn, csRepairBtn = buttonRow("Mein Account: lädt vorher jedes Bild der Cutscene (Texturen, Decals, Partikel) unter deinem Account neu hoch, setzt die neuen IDs in die Kopie ein, auch im Script-Code, und lädt dann alles herunter. Braucht apikey.txt. Animationen und Sounds behalten ihre alten IDs, die lädt der Server nicht hoch.\n\nSucht im Code der ausgewählten Scripts alles, was die Cutscene benutzt: Models, Rigs mit AnimationController oder Humanoid, Kameras, Parts, Animationen, Sounds, Remotes und Module. Module, die per require geladen werden, durchsucht es genauso mit.\n\nAlles landet in downloads/<Name>/: <Name>.rbxm mit den Ordnern Code und Objekte (in Studio per Rechtsklick > Insert from File einfügbar), code.lua zum Lesen und jede Animation, jeder Sound und jedes Bild als eigene Datei.\n\nJede Animation steckt zusätzlich als KeyframeSequence in ihrem Animation-Objekt. Damit läuft die Cutscene mit Abspielen in jeder Place, auch wenn Roblox die Original-ID dort sperrt.\n\nKlick auf eine Zeile in der Liste zeigt das Objekt im Explorer.",
-	"Herunterladen", ACCENT, "Mein Account", PURPLE)
+local csDownloadBtn, csRepairBtn = select(2, buttonRow("Mein Account: lädt vorher jedes Bild der Cutscene (Texturen, Decals, Partikel) unter deinem Account neu hoch, setzt die neuen IDs in die Kopie ein, auch im Script-Code, und lädt dann alles herunter. Braucht apikey.txt. Animationen und Sounds behalten ihre alten IDs, die lädt der Server nicht hoch.\n\nSucht im Code der ausgewählten Scripts alles, was die Cutscene benutzt: Models, Rigs mit AnimationController oder Humanoid, Kameras, Parts, Animationen, Sounds, Remotes und Module. Module, die per require geladen werden, durchsucht es genauso mit.\n\nAlles landet in downloads/<Name>/: <Name>.rbxm mit den Ordnern Code und Objekte (in Studio per Rechtsklick > Insert from File einfügbar), code.lua zum Lesen und jede Animation, jeder Sound und jedes Bild als eigene Datei.\n\nJede Animation steckt zusätzlich als KeyframeSequence in ihrem Animation-Objekt. Damit läuft die Cutscene mit Abspielen in jeder Place, auch wenn Roblox die Original-ID dort sperrt.\n\nKlick auf eine Zeile in der Liste zeigt das Objekt im Explorer.",
+	"Herunterladen", ACCENT, "Mein Account", PURPLE))
 -- Eine Tabelle statt mehrerer locals: Luau erlaubt höchstens 200 lokale Variablen pro Funktion.
 local csPlay = {}
 csPlay.row, csPlay.play, csPlay.auto = buttonRow("Abspielen: Cutscene im Explorer anklicken (das Cutscene-Script aus dem Spiel oder den eingefügten Download-Ordner) und drücken. Die Kamera fliegt wie im Spiel mit, jedes Rig spielt seine Animation, danach ist alles wieder wie vorher. Klappt im Edit-Modus und im Play-Test. Nochmal drücken stoppt.\n\nWer spielt was: Die Kamera-Animation (Camera) läuft auf dem Kamera-Rig (Cam, CameraRig …), jede andere Animation auf dem Rig mit passendem Namen. Spieler-Animationen (Player, CloneAnim …) laufen auf einem Dummy, im Play-Test auf deiner Figur. Hängt die Kamera am Spieler (z. B. Barrage-Finisher), steht sie an deiner Figur bzw. am Dummy.\n\nBeim Play-Test: merkt sich die angeklickte Cutscene. Jeder Play-Test (F5) spielt sie dann einmal ab, sobald deine Figur da ist. Nochmal drücken schaltet es aus.\n\nNicht nachgebaut: Effekte, die der Code zu bestimmten Zeitpunkten auslöst (Partikel-Bursts, Sounds, Bildschirm-Effekte).",
@@ -2251,183 +2258,185 @@ plugin.Unloading:Connect(stopScene)
 -- Was ein Cutscene-Script braucht, steht in seinem Code: Pfade zu Objekten, require(...) auf Module und
 -- Asset-IDs. Gesucht wird wie bei den Effekten, aber jede Objektart zählt und Module werden mit durchsucht.
 do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze von 200
-	local CUTSCENE_MAX_DESCENDANTS = 10000 -- obere Grenze, auch wenn der Code ein Objekt ganz braucht
-	local CUTSCENE_MAX_DEPTH = 4 -- require-Ketten so tief verfolgen
-	local CUTSCENE_STORE_SIZE = 300 -- größere Objekte nur, wenn der Code sie ganz braucht (sonst Lager wie Anims, Sounds)
-	local CUTSCENE_LIBRARY_USERS = 3 -- ab so vielen anderen Scripts, die ein Modul laden, ist es eine Bibliothek
-	-- Code braucht ein Objekt ganz, wenn er es klont, durchläuft, umhängt oder mit einem Variablennamen darin sucht.
-	-- Feste Namen in FindFirstChild("x") und ["x"] hat normalize() schon zu .x gemacht, was übrig bleibt, ist dynamisch.
-	local WHOLE_USES = { ":GetChildren", ":GetDescendants", ":Clone", ":FindFirstChild", ":WaitForChild", "%[", "%.Parent%s*=[^=]" }
+	local csCurrent = nil -- { scripts, objects, ids }
+	do -- Suche nach Abhängigkeiten: eigener Block, danach braucht nur noch csCurrent die Ergebnisse
+		local CUTSCENE_MAX_DESCENDANTS = 10000 -- obere Grenze, auch wenn der Code ein Objekt ganz braucht
+		local CUTSCENE_MAX_DEPTH = 4 -- require-Ketten so tief verfolgen
+		local CUTSCENE_STORE_SIZE = 300 -- größere Objekte nur, wenn der Code sie ganz braucht (sonst Lager wie Anims, Sounds)
+		local CUTSCENE_LIBRARY_USERS = 3 -- ab so vielen anderen Scripts, die ein Modul laden, ist es eine Bibliothek
+		-- Code braucht ein Objekt ganz, wenn er es klont, durchläuft, umhängt oder mit einem Variablennamen darin sucht.
+		-- Feste Namen in FindFirstChild("x") und ["x"] hat normalize() schon zu .x gemacht, was übrig bleibt, ist dynamisch.
+		local WHOLE_USES = { ":GetChildren", ":GetDescendants", ":Clone", ":FindFirstChild", ":WaitForChild", "%[", "%.Parent%s*=[^=]" }
 
-	local function usedWhole(obj, text, alias)
-		local token = obj.Name:gsub(" ", "\1")
-		local names = { token }
-		for name, target in alias do
-			if target == token then table.insert(names, name) end
-		end
-		for _, n in names do
-			local p = "%f[%w_\1]" .. (n:gsub("[^%w_\1]", "%%%0")) .. "%f[^%w_\1]"
-			for _, use in WHOLE_USES do
-				if text:find(p .. use) then return true end
+		local function usedWhole(obj, text, alias)
+			local token = obj.Name:gsub(" ", "\1")
+			local names = { token }
+			for name, target in alias do
+				if target == token then table.insert(names, name) end
 			end
-		end
-		return false
-	end
-
-	local function indexAll()
-		local byName, sources = {}, {}
-		for _, obj in game:GetDescendants() do
-			local ok, name = pcall(function() return obj.Name end)
-			if ok then
-				byName[name] = byName[name] or {}
-				table.insert(byName[name], obj)
-			end
-			local okSrc, src = pcall(function() return obj:IsA("LuaSourceContainer") and obj.Source end)
-			if okSrc and src then sources[obj] = src end
-		end
-		return byName, sources
-	end
-
-	-- FindFirstChild(Name) mit Name = script.Name wird zum echten Namen, sonst käme der ganze Ordner aller Varianten mit.
-	local function withScriptName(src, name)
-		local vars = { "script%.Name" }
-		for v in src:gmatch("local ([%w_]+) = script%.Name%s") do table.insert(vars, v) end
-		local function literal() return ('["%s"]'):format(name) end
-		for _, v in vars do
-			src = src:gsub(":FindFirstChild%(" .. v .. "%)", literal):gsub(":WaitForChild%(" .. v .. "%)", literal)
-				:gsub("%[" .. v .. "%]", literal)
-		end
-		return src
-	end
-
-	local function cutsceneScripts()
-		local scripts, seen = {}, {}
-		for _, sel in Selection:Get() do
-			local list = sel:GetDescendants()
-			table.insert(list, 1, sel)
-			for _, obj in list do
-				if obj:IsA("LuaSourceContainer") and not seen[obj] then
-					seen[obj] = true
-					table.insert(scripts, obj)
-				end
-			end
-		end
-		return scripts
-	end
-
-	-- Gibt Scripts (Auswahl plus benutzte Module), Objekte und Asset-IDs zurück.
-	-- Bibliotheken (FunctionLibrary & Co.) kommen nur als Code mit: ihre Objekte gehören zum ganzen Spiel.
-	local function cutsceneDeps(selected)
-		local byName, sources = indexAll()
-		local selectedSet = {}
-		for _, s in selected do selectedSet[s] = true end
-		-- shortcut: zählt Scripts, in denen Modulname und "require" vorkommen, nicht echte require-Aufrufe
-		local function isLibrary(module)
-			local users = 0
-			for s, src in sources do
-				if s ~= module and not selectedSet[s] and src:find(module.Name, 1, true) and src:find("require", 1, true) then
-					users += 1
-					if users >= CUTSCENE_LIBRARY_USERS then return true end
+			for _, n in names do
+				local p = "%f[%w_\1]" .. (n:gsub("[^%w_\1]", "%%%0")) .. "%f[^%w_\1]"
+				for _, use in WHOLE_USES do
+					if text:find(p .. use) then return true end
 				end
 			end
 			return false
 		end
-		local scripts, objects, ids = {}, {}, {}
-		local seenScript, seenObj, seenId, libSet = {}, {}, {}, {}
-		local function addId(id)
-			if #id >= 5 and not seenId[id] then
-				seenId[id] = true
-				table.insert(ids, id)
+
+		local function indexAll()
+			local byName, sources = {}, {}
+			for _, obj in game:GetDescendants() do
+				local ok, name = pcall(function() return obj.Name end)
+				if ok then
+					byName[name] = byName[name] or {}
+					table.insert(byName[name], obj)
+				end
+				local okSrc, src = pcall(function() return obj:IsA("LuaSourceContainer") and obj.Source end)
+				if okSrc and src then sources[obj] = src end
 			end
+			return byName, sources
 		end
-		local queue = {}
-		for _, s in selected do table.insert(queue, { s, 0, false }) end
-		while #queue > 0 do
-			local s, depth, lib = table.unpack(table.remove(queue, 1))
-			if not seenScript[s] then
-				seenScript[s] = true
-				table.insert(scripts, s)
-				libSet[s] = lib or nil
-				local src = withScriptName(sources[s] or "", s.Name)
-				if not lib then
-					for id in src:gmatch("rbxassetid://(%d+)") do addId(id) end
-					for id in src:gmatch("[?&][iI][dD]=(%d+)") do addId(id) end
-					for id in src:gmatch("[Ii]d%s*=%s*(%d+)") do addId(id) end -- AnimationId = 123, SoundId = 123
-				end
-				local text, alias = normalize(src), {}
-				for name, rhs in text:gmatch("local ([%w_]+) = ([^\n]+)") do
-					alias[name] = rhs:match("([%w_\1]+)%s*%)*%s*$")
-				end
-				local function accept(obj)
-					if obj:IsA("LuaSourceContainer") then return obj:IsA("ModuleScript") end
-					if lib then return false end -- Bibliotheken: nur ihre Module zählen
-					return #obj:GetDescendants() <= CUTSCENE_STORE_SIZE or usedWhole(obj, text, alias)
-				end
-				local entry = { name = s.Name, script = s, line = 1, text = src, source = src }
-				for _, obj in effectObjects(entry, byName, accept, CUTSCENE_MAX_DESCENDANTS) do
-					if obj:IsA("ModuleScript") then
-						if depth < CUTSCENE_MAX_DEPTH and not seenScript[obj] then
-							table.insert(queue, { obj, depth + 1, lib or isLibrary(obj) })
-						end
-					elseif not lib and not seenObj[obj] then
-						seenObj[obj] = true
-						table.insert(objects, obj)
+
+		-- FindFirstChild(Name) mit Name = script.Name wird zum echten Namen, sonst käme der ganze Ordner aller Varianten mit.
+		local function withScriptName(src, name)
+			local vars = { "script%.Name" }
+			for v in src:gmatch("local ([%w_]+) = script%.Name%s") do table.insert(vars, v) end
+			local function literal() return ('["%s"]'):format(name) end
+			for _, v in vars do
+				src = src:gsub(":FindFirstChild%(" .. v .. "%)", literal):gsub(":WaitForChild%(" .. v .. "%)", literal)
+					:gsub("%[" .. v .. "%]", literal)
+			end
+			return src
+		end
+
+		local function cutsceneScripts()
+			local scripts, seen = {}, {}
+			for _, sel in Selection:Get() do
+				local list = sel:GetDescendants()
+				table.insert(list, 1, sel)
+				for _, obj in list do
+					if obj:IsA("LuaSourceContainer") and not seen[obj] then
+						seen[obj] = true
+						table.insert(scripts, obj)
 					end
 				end
 			end
+			return scripts
 		end
-		-- Objekte, die in einem anderen gefundenen Objekt stecken, nur einmal.
-		local top = {}
-		for _, obj in objects do
-			local inside = false
-			for _, other in objects do
-				if other ~= obj and obj:IsDescendantOf(other) then inside = true break end
+
+		-- Gibt Scripts (Auswahl plus benutzte Module), Objekte und Asset-IDs zurück.
+		-- Bibliotheken (FunctionLibrary & Co.) kommen nur als Code mit: ihre Objekte gehören zum ganzen Spiel.
+		local function cutsceneDeps(selected)
+			local byName, sources = indexAll()
+			local selectedSet = {}
+			for _, s in selected do selectedSet[s] = true end
+			-- shortcut: zählt Scripts, in denen Modulname und "require" vorkommen, nicht echte require-Aufrufe
+			local function isLibrary(module)
+				local users = 0
+				for s, src in sources do
+					if s ~= module and not selectedSet[s] and src:find(module.Name, 1, true) and src:find("require", 1, true) then
+						users += 1
+						if users >= CUTSCENE_LIBRARY_USERS then return true end
+					end
+				end
+				return false
 			end
-			if not inside then table.insert(top, obj) end
+			local scripts, objects, ids = {}, {}, {}
+			local seenScript, seenObj, seenId, libSet = {}, {}, {}, {}
+			local function addId(id)
+				if #id >= 5 and not seenId[id] then
+					seenId[id] = true
+					table.insert(ids, id)
+				end
+			end
+			local queue = {}
+			for _, s in selected do table.insert(queue, { s, 0, false }) end
+			while #queue > 0 do
+				local s, depth, lib = table.unpack(table.remove(queue, 1))
+				if not seenScript[s] then
+					seenScript[s] = true
+					table.insert(scripts, s)
+					libSet[s] = lib or nil
+					local src = withScriptName(sources[s] or "", s.Name)
+					if not lib then
+						for id in src:gmatch("rbxassetid://(%d+)") do addId(id) end
+						for id in src:gmatch("[?&][iI][dD]=(%d+)") do addId(id) end
+						for id in src:gmatch("[Ii]d%s*=%s*(%d+)") do addId(id) end -- AnimationId = 123, SoundId = 123
+					end
+					local text, alias = normalize(src), {}
+					for name, rhs in text:gmatch("local ([%w_]+) = ([^\n]+)") do
+						alias[name] = rhs:match("([%w_\1]+)%s*%)*%s*$")
+					end
+					local function accept(obj)
+						if obj:IsA("LuaSourceContainer") then return obj:IsA("ModuleScript") end
+						if lib then return false end -- Bibliotheken: nur ihre Module zählen
+						return #obj:GetDescendants() <= CUTSCENE_STORE_SIZE or usedWhole(obj, text, alias)
+					end
+					local entry = { name = s.Name, script = s, line = 1, text = src, source = src }
+					for _, obj in effectObjects(entry, byName, accept, CUTSCENE_MAX_DESCENDANTS) do
+						if obj:IsA("ModuleScript") then
+							if depth < CUTSCENE_MAX_DEPTH and not seenScript[obj] then
+								table.insert(queue, { obj, depth + 1, lib or isLibrary(obj) })
+							end
+						elseif not lib and not seenObj[obj] then
+							seenObj[obj] = true
+							table.insert(objects, obj)
+						end
+					end
+				end
+			end
+			-- Objekte, die in einem anderen gefundenen Objekt stecken, nur einmal.
+			local top = {}
+			for _, obj in objects do
+				local inside = false
+				for _, other in objects do
+					if other ~= obj and obj:IsDescendantOf(other) then inside = true break end
+				end
+				if not inside then table.insert(top, obj) end
+			end
+			for _, id in idsIn(top) do addId(id) end
+			return scripts, top, ids, libSet
 		end
-		for _, id in idsIn(top) do addId(id) end
-		return scripts, top, ids, libSet
+
+
+		local function refreshCutscene()
+			for _, old in csList:GetChildren() do
+				if old:IsA("GuiObject") then old:Destroy() end
+			end
+			local selected = cutsceneScripts()
+			if #selected == 0 then
+				csCurrent = nil
+				csInfo.TextColor3, csInfo.Text = MUTED, "Kein Script ausgewählt. Cutscene-Script oder seinen Ordner im Explorer anklicken."
+				return
+			end
+			local scripts, objects, ids, libSet = cutsceneDeps(selected)
+			csCurrent = { scripts = scripts, objects = objects, ids = ids }
+			csInfo.TextColor3 = TEXT
+			csInfo.Text = ("%d Scripts (davon %d Module über require), %d Objekte, %d Asset-IDs.")
+				:format(#scripts, #scripts - #selected, #objects, #ids)
+			local order = 0
+			local function row(text, obj)
+				order += 1
+				if order > 60 then return end -- shortcut: Liste kappt bei 60 Zeilen, heruntergeladen wird trotzdem alles
+				local b = listButton(text, csList)
+				b.LayoutOrder = order
+				if obj then b.Activated:Connect(function() Selection:Set({ obj }) end) end
+			end
+			for _, s in scripts do
+				row(("%s  ·  %s%s"):format(s.Name, s.ClassName, libSet[s] and ", Bibliothek: nur Code" or ""), s)
+			end
+			for _, obj in objects do
+				local rig = obj:FindFirstChildWhichIsA("AnimationController", true) or obj:FindFirstChildWhichIsA("Humanoid", true)
+				row(("%s  ·  %s%s"):format(obj:GetFullName(), obj.ClassName, rig and ", Rig" or ""), obj)
+			end
+			if #ids > 0 then row(("%d Asset-IDs: %s"):format(#ids, table.concat(ids, ", "):sub(1, 120))) end
+		end
+
+		Selection.SelectionChanged:Connect(function()
+			if pages.Cutscene.Visible then refreshCutscene() end
+		end)
+		tabs.Cutscene.Activated:Connect(refreshCutscene)
 	end
-
-	local csCurrent = nil -- { scripts, objects, ids }
-
-	local function refreshCutscene()
-		for _, old in csList:GetChildren() do
-			if old:IsA("GuiObject") then old:Destroy() end
-		end
-		local selected = cutsceneScripts()
-		if #selected == 0 then
-			csCurrent = nil
-			csInfo.TextColor3, csInfo.Text = MUTED, "Kein Script ausgewählt. Cutscene-Script oder seinen Ordner im Explorer anklicken."
-			return
-		end
-		local scripts, objects, ids, libSet = cutsceneDeps(selected)
-		csCurrent = { scripts = scripts, objects = objects, ids = ids }
-		csInfo.TextColor3 = TEXT
-		csInfo.Text = ("%d Scripts (davon %d Module über require), %d Objekte, %d Asset-IDs.")
-			:format(#scripts, #scripts - #selected, #objects, #ids)
-		local order = 0
-		local function row(text, obj)
-			order += 1
-			if order > 60 then return end -- shortcut: Liste kappt bei 60 Zeilen, heruntergeladen wird trotzdem alles
-			local b = listButton(text, csList)
-			b.LayoutOrder = order
-			if obj then b.Activated:Connect(function() Selection:Set({ obj }) end) end
-		end
-		for _, s in scripts do
-			row(("%s  ·  %s%s"):format(s.Name, s.ClassName, libSet[s] and ", Bibliothek: nur Code" or ""), s)
-		end
-		for _, obj in objects do
-			local rig = obj:FindFirstChildWhichIsA("AnimationController", true) or obj:FindFirstChildWhichIsA("Humanoid", true)
-			row(("%s  ·  %s%s"):format(obj:GetFullName(), obj.ClassName, rig and ", Rig" or ""), obj)
-		end
-		if #ids > 0 then row(("%d Asset-IDs: %s"):format(#ids, table.concat(ids, ", "):sub(1, 120))) end
-	end
-
-	Selection.SelectionChanged:Connect(function()
-		if pages.Cutscene.Visible then refreshCutscene() end
-	end)
-	tabs.Cutscene.Activated:Connect(refreshCutscene)
 
 	-- Animation als KeyframeSequence über den lokalen Server holen (der probiert die Spielkontexte durch).
 	-- Gleiche IDs nur einmal. Gibt den Clip oder nil.
@@ -2570,6 +2579,138 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 
 	csDownloadBtn.Activated:Connect(function() downloadCutscene(false, csDownloadBtn, "Herunterladen") end)
 	csRepairBtn.Activated:Connect(function() downloadCutscene(true, csRepairBtn, "Mein Account") end)
+
+	-- Animations-Ordner -------------------------------------------------------------------------
+	do -- eigener Block: seine Variablen zählen danach nicht mehr gegen Luaus Grenze von 200
+		-- Lässt den Server die Animation unter deinem Account neu hochladen. Gibt die neue ID oder nil, Fehler.
+		local function reuploadAnim(id, name)
+			local url = ("%s/api/plugin-upload-anim?q=%s&user=%d&place=%s&name=%s"):format(SERVER, id,
+				game:GetService("StudioService"):GetUserId(), HttpService:UrlEncode(placeBox.Text), HttpService:UrlEncode(name))
+			local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method = "GET" })
+			if not ok then return nil, "Server nicht erreichbar oder Zeitüberschreitung" end
+			local okJson, body = pcall(HttpService.JSONDecode, HttpService, res.Body)
+			if not res.Success then return nil, okJson and body.error or ("HTTP " .. res.StatusCode) end
+			return okJson and body.id or nil, "Antwort unlesbar"
+		end
+
+		-- Auswahl mit allen Unterordnern als eine .rbxm, jede Animation mit ihrer KeyframeSequence.
+		-- upload: vorher alles unter deiner ID hochladen und die neuen IDs einsetzen.
+		local function saveAnimFolder(upload, btn, idleText)
+			local out = animUi.label
+			local sel = Selection:Get()
+			if #sel == 0 then
+				out.TextColor3, out.Text = BAD, "Erst den Ordner mit den Animationen im Explorer anklicken (z. B. Anubis)."
+				return
+			end
+			if not btn.Active then return end
+			local roots, anims = {}, {}
+			for _, obj in sel do
+				local ok, copy = pcall(function() return obj:Clone() end)
+				if ok and copy then table.insert(roots, copy) end
+			end
+			for _, r in roots do
+				local list = r:GetDescendants()
+				table.insert(list, 1, r)
+				for _, a in list do
+					if a:IsA("Animation") and animId(a) then table.insert(anims, a) end
+				end
+			end
+			if #anims == 0 then
+				for _, r in roots do r:Destroy() end
+				out.TextColor3, out.Text = BAD, "In der Auswahl steckt keine Animation mit ID."
+				return
+			end
+			btn.Active = false
+			local name = #sel == 1 and sel[1].Name or ("%s +%d"):format(sel[1].Name, #sel - 1)
+			if upload then name ..= " (meine IDs)" end
+			local ids, nameOf = {}, {}
+			for _, a in anims do
+				local id = animId(a)
+				if not nameOf[id] then
+					nameOf[id] = a.Name
+					table.insert(ids, id)
+				end
+			end
+			local errors, map, clips, uploaded = {}, {}, 0, 0
+			-- 6 gleichzeitig: einzeln dauert ein ganzer Charakter (60 Animationen) über eine Minute.
+			local loadedCount, running = 0, 0
+			btn.Text = progress("Lade Animationen", 0, #ids)
+			for _, id in ids do
+				while running >= 6 do task.wait() end
+				running += 1
+				task.spawn(function()
+					pcall(fetchClip, id) -- ein Fehler darf den Zähler nicht hängen lassen
+					running -= 1
+					loadedCount += 1
+					btn.Text = progress("Lade Animationen", loadedCount, #ids)
+				end)
+			end
+			while running > 0 do task.wait() end
+			for _, id in ids do
+				if fetchClip(id) then clips += 1 else table.insert(errors, ("%s (%s): nicht ladbar"):format(nameOf[id], id)) end
+			end
+			if upload then
+				local known = plugin:GetSetting("repairedAnims") or {}
+				local user = tostring(game:GetService("StudioService"):GetUserId())
+				for i, id in ids do
+					btn.Text = progress("Lade hoch", i - 1, #ids)
+					local k = user .. ":" .. id
+					if known[k] then
+						map[id] = known[k]
+					elseif fetchClip(id) then
+						local newId, err = reuploadAnim(id, nameOf[id])
+						if newId then
+							map[id], known[k] = newId, newId
+						else
+							table.insert(errors, ("%s (%s): %s"):format(nameOf[id], id, err))
+						end
+					end
+					if map[id] then uploaded += 1 end
+				end
+				plugin:SetSetting("repairedAnims", known)
+			end
+			for _, a in anims do
+				local id = animId(a)
+				for _, c in a:GetChildren() do
+					if c:IsA("AnimationClip") then c:Destroy() end
+				end
+				local clip = fetchClip(id)
+				if clip then clip:Clone().Parent = a end
+				if map[id] then a.AnimationId = "rbxassetid://" .. map[id] end
+			end
+			local lines = { ("%d Animationen (%d verschiedene), %d mit KeyframeSequence."):format(#anims, #ids, clips) }
+			if upload then
+				table.insert(lines, ("%d/%d unter deiner ID hochgeladen, die neuen IDs stehen in der Datei."):format(uploaded, #ids))
+				local found, texIds = collectTextures(roots), {}
+				for tid in found do table.insert(texIds, tid) end
+				if #texIds > 0 then
+					local texLines = repairTextures(found, texIds, btn)
+					for _, l in texLines do table.insert(lines, l) end
+				end
+			end
+			btn.Text = "Speichere Datei …"
+			task.wait()
+			local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, roots)
+			for _, r in roots do r:Destroy() end
+			local stored = okSer and store(name, "", buffer.tostring(buf), btn)
+			local savedLine = stored and ("Gespeichert: downloads/%s/%s.rbxm (in Studio: Rechtsklick > Insert from File)"):format(name, name)
+				or "Datei konnte nicht gespeichert werden. Läuft start.bat?"
+			table.insert(lines, savedLine)
+			for i, e in errors do
+				if i > 8 then
+					table.insert(lines, ("… und %d weitere"):format(#errors - 8))
+					break
+				end
+				table.insert(lines, e)
+			end
+			btn.Active, btn.Text = true, idleText
+			out.TextColor3, out.Text = (stored and #errors == 0) and OK or BAD, table.concat(lines, "\n")
+			status.TextColor3, status.Text = out.TextColor3, savedLine
+		end
+
+		animUi.save.Activated:Connect(function() saveAnimFolder(false, animUi.save, "Herunterladen") end)
+		animUi.upload.Activated:Connect(function() saveAnimFolder(true, animUi.upload, "Unter meiner ID") end)
+	end
 
 	-- Abspielen -------------------------------------------------------------------------------
 	-- Der Cutscene-Code läuft nicht: Er braucht den CutsceneController und die Daten des Spiels. Stattdessen macht
