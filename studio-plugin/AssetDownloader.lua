@@ -341,8 +341,8 @@ vlist(cartList, 4)
 local folderBox = input("Ordnername (leer = Korb + Datum)")
 local cartBtn = button("Korb herunterladen", GREEN,
 	"Speichert alles im Korb nach downloads/<Ordnername>/. Ohne Namen heißt der Ordner \"Korb\" plus Datum. Klappt alles, wird der Korb geleert.")
-local cartUploadBtn = button("Bilder im Korb hochladen", PURPLE,
-	"Lädt alle Bilder im Korb unter deinem Namen hoch. Die neuen IDs erscheinen oben zum Kopieren. Braucht apikey.txt.")
+local cartUploadBtn = button("Herunterladen + Bilder hochladen", PURPLE,
+	"Ein Knopf für beides: Speichert erst alles im Korb nach downloads/<Ordnername>/ (wie Korb herunterladen), dann lädt er alle Bilder im Korb unter deinem Namen hoch. Die neuen IDs erscheinen unten zum Kopieren. Braucht apikey.txt.")
 folderBox.Visible, cartBtn.Visible, cartUploadBtn.Visible = false, false, false
 
 -- Tab: VFX ---------------------------------------------------------------------------------
@@ -1319,21 +1319,13 @@ uploadBtn.Activated:Connect(function()
 		backup(copies, loaded.name, true, uploadBtn, "Herunterladen unter meinem Namen", savedLabel)
 	end
 end)
-cartUploadBtn.Activated:Connect(function()
-	if not cartUploadBtn.Active then return end
-	local images = {}
-	for _, item in cart do
-		if item.kind == "Image" then table.insert(images, item) end
-	end
-	uploadImages(images, cartUploadBtn, "Bilder im Korb hochladen")
-end)
-cartBtn.Activated:Connect(function()
-	if #cart == 0 or not cartBtn.Active then return end
+-- Speichert den ganzen Korb nach downloads/<Ordner>/ (plus .rbxm der Auswahl). true, wenn alles klappte.
+local function downloadCart(btn, idleText)
 	local ids = {}
 	for _, item in cart do table.insert(ids, item.id) end
 	local folder = folderBox.Text:match("^%s*(.-)%s*$")
 	local name = folder ~= "" and folder or "Korb " .. os.date("%Y-%m-%d %H-%M")
-	local r = save(ids, name, cartBtn, "Korb herunterladen")
+	local r = save(ids, name, btn, idleText)
 	local rbxmOk = true
 	if r and cartSource then
 		local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, cartSource.objects)
@@ -1341,11 +1333,33 @@ cartBtn.Activated:Connect(function()
 		status.Text ..= rbxmOk and (" + %s.rbxm"):format(name) or " (.rbxm konnte nicht gespeichert werden)"
 		if not rbxmOk then status.TextColor3 = BAD end
 	end
-	if r and #r.errors == 0 and rbxmOk then
-		table.clear(cart)
-		cartSource, folderBox.Text = nil, ""
-		refreshCart()
+	return r ~= nil and #r.errors == 0 and rbxmOk
+end
+
+local function clearCart()
+	table.clear(cart)
+	cartSource, folderBox.Text = nil, ""
+	refreshCart()
+end
+
+cartUploadBtn.Activated:Connect(function()
+	if #cart == 0 or not cartUploadBtn.Active then return end
+	local images = {}
+	for _, item in cart do
+		if item.kind == "Image" then table.insert(images, item) end
 	end
+	-- Erst herunterladen, dann hochladen: Ein Knopf für beides. Korb erst danach leeren.
+	local savedOk = downloadCart(cartUploadBtn, "Herunterladen + Bilder hochladen")
+	local savedText = status.Text
+	uploadImages(images, cartUploadBtn, "Herunterladen + Bilder hochladen")
+	local uploadedOk = status.TextColor3 == OK
+	status.Text = savedText .. "\n" .. status.Text
+	status.TextColor3 = savedOk and uploadedOk and OK or BAD
+	if savedOk and uploadedOk then clearCart() end
+end)
+cartBtn.Activated:Connect(function()
+	if #cart == 0 or not cartBtn.Active then return end
+	if downloadCart(cartBtn, "Korb herunterladen") then clearCart() end
 end)
 insertBtn.Activated:Connect(insert)
 playBtn.Activated:Connect(function()
