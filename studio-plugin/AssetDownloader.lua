@@ -763,6 +763,8 @@ local function playSelection(outLabel)
 end
 
 local cart, bulkItems = {}, {}
+-- Explorer-Auswahl hinter der Bulk-Liste bzw. dem Korb: gibt dem Ordner den Namen und kommt als .rbxm mit.
+local bulkSource, cartSource
 
 local function listButton(text, parent)
 	local b = makeButton(text, FIELD)
@@ -1251,7 +1253,9 @@ pickBtn.Activated:Connect(function()
 		idBox.Text = ids[1]
 		load(ids[1])
 	else
+		local sel = Selection:Get()
 		bulkBox.Text = table.concat(ids, "\n")
+		bulkSource = { name = #sel == 1 and sel[1].Name or ("%s +%d"):format(sel[1].Name, #sel - 1), objects = sel, text = bulkBox.Text }
 		showTab("Bulk")
 		loadBulk()
 	end
@@ -1271,6 +1275,11 @@ saveSelBtn.Activated:Connect(function() if saveSelBtn.Active then backupSelectio
 playSelBtn.Activated:Connect(function() playSelection(vfxLabel) end)
 bulkAllBtn.Activated:Connect(function()
 	for _, item in bulkItems do addToCart(item.id, item.name, item.type) end
+	-- Liste stammt unverändert aus der Explorer-Auswahl: Ordner danach benennen, .rbxm kommt beim Herunterladen dazu.
+	if bulkSource and bulkSource.text == bulkBox.Text then
+		cartSource = bulkSource
+		if folderBox.Text:match("^%s*$") then folderBox.Text = bulkSource.name end
+	end
 end)
 -- Bilder unter dem eigenen Account hochladen. Liste alt -> neu landet im Kopierfeld.
 local function uploadImages(items, btn, idleText)
@@ -1323,9 +1332,18 @@ cartBtn.Activated:Connect(function()
 	local ids = {}
 	for _, item in cart do table.insert(ids, item.id) end
 	local folder = folderBox.Text:match("^%s*(.-)%s*$")
-	local r = save(ids, folder ~= "" and folder or "Korb " .. os.date("%Y-%m-%d %H-%M"), cartBtn, "Korb herunterladen")
-	if r and #r.errors == 0 then
+	local name = folder ~= "" and folder or "Korb " .. os.date("%Y-%m-%d %H-%M")
+	local r = save(ids, name, cartBtn, "Korb herunterladen")
+	local rbxmOk = true
+	if r and cartSource then
+		local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, cartSource.objects)
+		rbxmOk = okSer and store(name, "", buffer.tostring(buf))
+		status.Text ..= rbxmOk and (" + %s.rbxm"):format(name) or " (.rbxm konnte nicht gespeichert werden)"
+		if not rbxmOk then status.TextColor3 = BAD end
+	end
+	if r and #r.errors == 0 and rbxmOk then
 		table.clear(cart)
+		cartSource, folderBox.Text = nil, ""
 		refreshCart()
 	end
 end)
