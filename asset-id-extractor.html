@@ -1,0 +1,187 @@
+<title>Roblox Asset ID Extractor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+/* Layout: two-pane workbench, input left, results right; stacks on phones. */
+:root {
+  --bg: #eef1f5; --panel: #ffffff; --fg: #18202b; --muted: #5d6878; --line: #d5dbe4;
+  --accent: #0b6bcb; --accent-fg: #ffffff; --chip: #e3ecf7; --ok: #1f7a4a;
+  --display: "Familjen Grotesk", "Segoe UI", sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11161d; --panel: #19212b; --fg: #e4e9f0; --muted: #93a0b2; --line: #2b3542;
+  --accent: #4ea1f3; --accent-fg: #0b1420; --chip: #213247; --ok: #5ccf8f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11161d; --panel: #19212b; --fg: #e4e9f0; --muted: #93a0b2; --line: #2b3542;
+  --accent: #4ea1f3; --accent-fg: #0b1420; --chip: #213247; --ok: #5ccf8f; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 28px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 20px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 1.9rem; margin: 0; text-wrap: balance; }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 65ch; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; min-width: 0; align-content: start; }
+.pane h2 { font-family: var(--display); font-size: 1.05rem; margin: 0; letter-spacing: .02em; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.count { font-family: var(--mono); font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+textarea { width: 100%; box-sizing: border-box; min-height: 260px; resize: vertical; font-family: var(--mono); font-size: 13px;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.drop { border: 1.5px dashed var(--line); border-radius: 8px; padding: 14px; text-align: center; color: var(--muted); cursor: pointer; }
+.drop.over { border-color: var(--accent); color: var(--accent); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+label.opt { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: .9rem; }
+button, select { font: inherit; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 7px 12px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 500; }
+button:focus-visible, select:focus-visible, textarea:focus-visible, .drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.list { max-height: 380px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td, th { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+th { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); position: sticky; top: 0; background: var(--panel); }
+td.id { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.chip { font-size: .75rem; background: var(--chip); padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+.empty { color: var(--muted); padding: 18px; text-align: center; }
+#out { min-height: 120px; }
+.toast { color: var(--ok); font-size: .9rem; min-height: 1.2em; }
+.note { color: var(--muted); font-size: .82rem; margin: 0; }
+@media (prefers-reduced-motion: no-preference) { button { transition: filter .15s; } button:hover { filter: brightness(1.08); } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Roblox Asset ID Extractor</h1>
+    <p class="sub">Links, Scripts oder ganze .rbxmx/.rbxlx-Dateien reinwerfen. Alle Asset-IDs werden gefunden, doppelte entfernt und im gewünschten Format kopiert.</p>
+  </header>
+
+  <div class="grid">
+    <section class="pane">
+      <h2>Input <span class="count" id="inCount"></span></h2>
+      <textarea id="input" spellcheck="false" aria-label="Text mit Links oder IDs"></textarea>
+      <div class="drop" id="drop" tabindex="0" role="button">Dateien hier ablegen oder klicken (.rbxmx, .rbxlx, .lua, .txt, .json …) – mehrere gleichzeitig</div>
+      <input type="file" id="file" multiple hidden>
+      <div class="row">
+        <label class="opt"><input type="checkbox" id="bare"> Lose Zahlen mitnehmen (6–19 Ziffern)</label>
+      </div>
+      <div class="row">
+        <button id="clear">Leeren</button>
+        <button id="sample">Beispiel laden</button>
+      </div>
+      <p class="note">Binäre .rbxm/.rbxl-Dateien sind komprimiert. In Studio als .rbxmx/.rbxlx (XML) speichern, dann funktioniert es.</p>
+    </section>
+
+    <section class="pane">
+      <h2>Gefundene IDs <span class="count" id="outCount">0</span></h2>
+      <div class="list" id="list"></div>
+      <div class="row">
+        <select id="fmt" aria-label="Ausgabeformat">
+          <option value="plain">Nur IDs (eine pro Zeile)</option>
+          <option value="rbx">rbxassetid://ID</option>
+          <option value="csv">Komma-Liste</option>
+          <option value="lua">Luau-Table</option>
+          <option value="tsv">ID + Typ (für Sheets)</option>
+        </select>
+        <button class="primary" id="copy">Alle kopieren</button>
+      </div>
+      <textarea id="out" readonly aria-label="Ausgabe"></textarea>
+      <div class="toast" id="toast" role="status"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+// Order matters: specific patterns first, so a number gets its most precise type.
+const RULES = [
+  ["rbxassetid", /rbxassetid:\/\/(\d+)/gi],
+  ["rbxthumb", /rbxthumb:\/\/[^\s"'<]*?id=(\d+)/gi],
+  ["asset ?id=", /roblox\.com\/(?:v1\/)?asset\/?\?[^\s"'<]*?\bid=(\d+)/gi],
+  ["Catalog", /roblox\.com\/catalog\/(\d+)/gi],
+  ["Library", /roblox\.com\/library\/(\d+)/gi],
+  ["Bundle", /roblox\.com\/bundles\/(\d+)/gi],
+  ["Creator Store", /create\.roblox\.com\/(?:store|marketplace)\/asset\/(\d+)/gi],
+  ["Game Pass", /roblox\.com\/game-pass\/(\d+)/gi],
+  ["Place", /roblox\.com\/games\/(\d+)/gi],
+  ["Badge", /roblox\.com\/badges\/(\d+)/gi],
+  ["XML Content", /<url>\s*(?:rbxassetid:\/\/|https?:\/\/www\.roblox\.com\/asset\/\?id=)?(\d+)\s*<\/url>/gi],
+  ["Property", /\b(?:AnimationId|SoundId|MeshId|TextureId?|Image|Texture|ShirtTemplate|PantsTemplate|Graphic)\b\D{0,20}?(\d{5,19})/g],
+];
+const BARE = /\b(\d{6,19})\b/g;
+
+function extract(text, withBare) {
+  const found = new Map(); // id -> type (first match wins)
+  for (const [type, re] of RULES) for (const m of text.matchAll(re)) if (!found.has(m[1])) found.set(m[1], type);
+  if (withBare) for (const m of text.matchAll(BARE)) if (!found.has(m[1])) found.set(m[1], "Zahl");
+  return [...found].map(([id, type]) => ({ id, type }));
+}
+
+// self-check
+(() => {
+  const r = extract("rbxassetid://123456 https://www.roblox.com/catalog/7654321/Hat rbxassetid://123456 roblox.com/asset/?id=999999", false);
+  console.assert(r.length === 3 && r[0].id === "123456" && r[1].type === "asset ?id=", "extract self-check failed", r);
+})();
+
+const $ = id => document.getElementById(id);
+let rows = [];
+
+function format(list, fmt) {
+  const ids = list.map(r => r.id);
+  if (fmt === "rbx") return ids.map(i => "rbxassetid://" + i).join("\n");
+  if (fmt === "csv") return ids.join(", ");
+  if (fmt === "lua") return "local ids = {\n" + ids.map(i => "\t" + i + ",").join("\n") + "\n}";
+  if (fmt === "tsv") return list.map(r => r.id + "\t" + r.type).join("\n");
+  return ids.join("\n");
+}
+
+function render() {
+  const text = $("input").value;
+  rows = extract(text, $("bare").checked);
+  $("inCount").textContent = text ? text.length.toLocaleString("de-DE") + " Zeichen" : "";
+  $("outCount").textContent = rows.length;
+  $("list").innerHTML = rows.length
+    ? "<table><thead><tr><th>#</th><th>ID</th><th>Quelle</th></tr></thead><tbody>" +
+      rows.map((r, i) => `<tr><td class="count">${i + 1}</td><td class="id">${r.id}</td><td><span class="chip">${r.type}</span></td></tr>`).join("") +
+      "</tbody></table>"
+    : '<div class="empty">Noch keine IDs. Links einfügen oder Dateien ablegen.</div>';
+  $("out").value = format(rows, $("fmt").value);
+}
+
+async function addFiles(files) {
+  const parts = await Promise.all([...files].map(f => f.text().then(t => `-- ${f.name}\n${t}`)));
+  $("input").value = [$("input").value, ...parts].filter(Boolean).join("\n");
+  render();
+  $("toast").textContent = files.length + " Datei(en) geladen.";
+}
+
+const SAMPLE = `-- Beispiel (zum Testen)
+https://www.roblox.com/catalog/16630147/Beautiful-Hair-for-Beautiful-People
+https://create.roblox.com/store/asset/507766388/Zombie-Animation
+local sound = Instance.new("Sound"); sound.SoundId = "rbxassetid://1843463175"
+anim.AnimationId = "rbxassetid://507766388"
+https://www.roblox.com/game-pass/1234567/VIP
+<Content name="MeshId"><url>rbxassetid://4560782049</url></Content>
+https://www.roblox.com/library/142785488/Model`;
+
+$("input").addEventListener("input", render);
+$("bare").addEventListener("change", render);
+$("fmt").addEventListener("change", render);
+$("clear").onclick = () => { $("input").value = ""; $("toast").textContent = ""; render(); };
+$("sample").onclick = () => { $("input").value = SAMPLE; render(); };
+$("copy").onclick = () => {
+  const out = $("out");
+  if (!out.value) { $("toast").textContent = "Nichts zu kopieren."; return; }
+  navigator.clipboard.writeText(out.value)
+    .then(() => $("toast").textContent = rows.length + " IDs kopiert.")
+    .catch(() => { out.select(); $("toast").textContent = "Markiert. Mit Strg+C kopieren."; });
+};
+const drop = $("drop");
+drop.onclick = () => $("file").click();
+drop.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } };
+$("file").onchange = e => addFiles(e.target.files);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); };
+
+$("input").value = SAMPLE;
+render();
+</script>

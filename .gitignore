@@ -1,0 +1,6 @@
+# Persönlicher Roblox-Login, niemals hochladen
+cookie.txt
+*.bak-*
+
+__pycache__/
+downloads/
