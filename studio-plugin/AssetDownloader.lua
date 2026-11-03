@@ -363,7 +363,7 @@ local vfxLabel = label("")
 card("Animations-Ordner", "Ordner mit Animationen im Explorer anklicken, z. B. Anubis mit Abilities und Attack.")
 -- Eine Tabelle statt mehrerer locals: Luau erlaubt höchstens 200 lokale Variablen pro Funktion.
 local animUi = {}
-animUi.row, animUi.save, animUi.upload = buttonRow("Herunterladen speichert die Auswahl als eine Datei nach downloads/<Name>/<Name>.rbxm, mit allen Unterordnern und Namen genau wie im Explorer (z. B. Anubis > Abilities > Barrage, Anubis > Attack > M1).\n\nJede Animation bekommt ihre KeyframeSequence mit in die Datei. So kannst du sie in jeder Place ansehen und im Animation Editor öffnen, auch wenn Roblox die Original-ID dort sperrt.\n\nUnter meiner ID macht dasselbe, lädt aber vorher jede Animation unter deinem Account hoch (und Bilder, falls welche drin sind) und setzt die neuen IDs in die Datei ein. Dann laufen die Animationen in deinen eigenen Spielen. Datei: downloads/<Name> (meine IDs)/. Schon hochgeladene Animationen werden nicht doppelt hochgeladen. Braucht apikey.txt mit Assets Read + Write.\n\nIn der anderen Place: Rechtsklick > Insert from File und die .rbxm wählen.",
+animUi.row, animUi.save, animUi.upload = buttonRow("Herunterladen speichert die Auswahl als eine Datei nach downloads/<Name>/<Name>.rbxm, mit allen Unterordnern und Namen genau wie im Explorer (z. B. Anubis > Abilities > Barrage, Anubis > Attack > M1).\n\nIn der Datei liegt jede Animation als KeyframeSequence mit ihrem Namen, ohne Asset-ID, so wie aus dem Animation Editor gespeichert. So kannst du sie in jeder Place ansehen und bearbeiten. Lässt sich eine nicht laden, bleibt sie als Animation mit ID drin und steht in der Fehlerliste.\n\nUnter meiner ID lädt jede Animation unter deinem Account hoch (und Bilder, falls welche drin sind). In der Datei bleiben die Animation-Objekte mit deinen neuen IDs, jeweils mit der KeyframeSequence darin. Dann laufen die Animationen in deinen eigenen Spielen. Datei: downloads/<Name> (meine IDs)/. Schon hochgeladene Animationen werden nicht doppelt hochgeladen. Braucht apikey.txt mit Assets Read + Write.\n\nIn der anderen Place: Rechtsklick > Insert from File und die .rbxm wählen.",
 	"Herunterladen", GREEN, "Unter meiner ID", PURPLE)
 animUi.label = label("")
 
@@ -2669,16 +2669,29 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 				end
 				plugin:SetSetting("repairedAnims", known)
 			end
+			local replaced = 0
 			for _, a in anims do
 				local id = animId(a)
 				for _, c in a:GetChildren() do
 					if c:IsA("AnimationClip") then c:Destroy() end
 				end
 				local clip = fetchClip(id)
-				if clip then clip:Clone().Parent = a end
-				if map[id] then a.AnimationId = "rbxassetid://" .. map[id] end
+				if clip and not upload then
+					-- Herunterladen: nur die Keyframes, ohne Asset-ID, wie aus dem Animation Editor gespeichert.
+					local copy = clip:Clone()
+					copy.Name, copy.Parent = a.Name, a.Parent
+					local index = table.find(roots, a)
+					if index then roots[index] = copy end
+					a:Destroy()
+					replaced += 1
+				else
+					-- Unter meiner ID (oder nicht ladbar): Animation-Objekt bleibt, das Spiel braucht die ID.
+					if clip then clip:Clone().Parent = a end
+					if map[id] then a.AnimationId = "rbxassetid://" .. map[id] end
+				end
 			end
-			local lines = { ("%d Animationen (%d verschiedene), %d mit KeyframeSequence."):format(#anims, #ids, clips) }
+			local lines = { upload and ("%d Animationen (%d verschiedene), %d mit KeyframeSequence."):format(#anims, #ids, clips)
+				or ("%d/%d Animationen als KeyframeSequence gespeichert (ohne Asset-ID)."):format(replaced, #anims) }
 			if upload then
 				table.insert(lines, ("%d/%d unter deiner ID hochgeladen, die neuen IDs stehen in der Datei."):format(uploaded, #ids))
 				local found, texIds = collectTextures(roots), {}

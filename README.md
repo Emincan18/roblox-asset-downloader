@@ -63,8 +63,8 @@ Fenster direkt in Studio mit mehreren Tabs. Neben jedem Knopf erklärt ein **i**
 - **Auswahl abspielen**: Emitter auslösen. Lose Attachments kommen dafür an ein unsichtbares Teil.
 
 **Animations-Ordner** (Tab VFX): Ordner mit Animationen anklicken, z. B. einen ganzen Charakter wie `Anubis`.
-- **Herunterladen** speichert alles als eine Datei `downloads/<Name>/<Name>.rbxm`, mit allen Unterordnern und Namen wie im Explorer (z. B. `Anubis > Attack > M1`). Jede Animation hat ihre KeyframeSequence dabei. In einer anderen Place: Rechtsklick > Insert from File.
-- **Unter meiner ID** lädt vorher jede Animation (und Bilder) unter deinem Account hoch und setzt die neuen IDs in die Datei ein. Datei: `downloads/<Name> (meine IDs)/`. Schon hochgeladene Animationen merkt sich der Server in `uploads.json`. Braucht `apikey.txt` mit Assets Read + Write.
+- **Herunterladen** speichert alles als eine Datei `downloads/<Name>/<Name>.rbxm`, mit allen Unterordnern und Namen wie im Explorer (z. B. `Anubis > Attack > M1`). Jede Animation liegt dort als KeyframeSequence mit ihrem Namen, ohne Asset-ID, wie aus dem Animation Editor. In einer anderen Place: Rechtsklick > Insert from File.
+- **Unter meiner ID** lädt jede Animation (und Bilder) unter deinem Account hoch. In der Datei bleiben die Animation-Objekte mit deinen neuen IDs, jeweils mit der KeyframeSequence darin. Datei: `downloads/<Name> (meine IDs)/`. Schon hochgeladene Animationen merkt sich der Server in `uploads.json`. Braucht `apikey.txt` mit Assets Read + Write.
 
 **Cutscene:** Cutscene-Script im Explorer anklicken.
 - **Herunterladen** speichert alles, was die Cutscene braucht, nach `downloads/<Name>/` und zeigt dabei Prozent. Jede Animation steckt zusätzlich als KeyframeSequence in ihrem Animation-Objekt, damit die Cutscene in jeder Place läuft.
