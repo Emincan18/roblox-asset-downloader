@@ -1,7 +1,8 @@
 --[[
 	Roblox Asset Downloader als Studio-Plugin.
-	Redet mit dem lokalen Server (start.bat), der die Assets lädt und in downloads/ speichert.
-	Zeigt Models und Animationen in einer Vorschau und fügt sie auf Knopfdruck ins Spiel ein.
+	Redet mit dem lokalen Server (start.bat), der die Assets von Roblox lädt.
+	Vorschau für Models, Animationen, Meshes, Bilder und Audio, Einfügen ins Spiel,
+	Herunterladen nach downloads/ und ein Korb, der alles gesammelt in einen Ordner lädt.
 ]]
 
 local HttpService = game:GetService("HttpService")
@@ -126,7 +127,7 @@ bulkBox.MultiLine, bulkBox.TextWrapped = true, true
 bulkBox.TextYAlignment = Enum.TextYAlignment.Top
 bulkBox.Size = UDim2.new(1, 0, 0, 90)
 bulkBox:FindFirstChildOfClass("UIPadding").PaddingTop = UDim.new(0, 6)
-local bulkBtn = button("Alle laden", Color3.fromRGB(70, 70, 80))
+local bulkBtn = button("Liste laden", Color3.fromRGB(70, 70, 80))
 local status = label("Server muss laufen: start.bat doppelklicken.")
 
 local view = add(corner(Instance.new("ViewportFrame")))
@@ -158,7 +159,33 @@ local playBtn = button("Abspielen", Color3.fromRGB(70, 70, 80), row)
 playBtn.Size = UDim2.new(0.5, -4, 1, 0)
 row.Visible = false
 
+local row2 = add(Instance.new("Frame"))
+row2.Size = UDim2.new(1, 0, 0, 34)
+row2.BackgroundTransparency = 1
+local row2List = Instance.new("UIListLayout", row2)
+row2List.FillDirection = Enum.FillDirection.Horizontal
+row2List.Padding = UDim.new(0, 8)
+local cartAddBtn = button("In den Korb", Color3.fromRGB(70, 70, 80), row2)
+cartAddBtn.Size = UDim2.new(0.5, -4, 1, 0)
+local downloadBtn = button("Herunterladen", Color3.fromRGB(40, 150, 90), row2)
+downloadBtn.Size = UDim2.new(0.5, -4, 1, 0)
+row2.Visible = false
+
 local savedLabel = label("")
+
+-- Korb: sammeln während man sich die Vorschau ansieht, dann alles in einen Ordner laden.
+local cartTitle = label("Korb ist leer", TEXT, 15)
+local cartList = add(Instance.new("Frame"))
+cartList.Size = UDim2.new(1, 0, 0, 0)
+cartList.AutomaticSize = Enum.AutomaticSize.Y
+cartList.BackgroundTransparency = 1
+Instance.new("UIListLayout", cartList).Padding = UDim.new(0, 4)
+local folderBox = input("Ordnername (leer = Korb + Datum)")
+local cartBtn = button("Korb herunterladen", Color3.fromRGB(40, 150, 90))
+folderBox.Visible, cartBtn.Visible = false, false
+
+local bulkAllBtn = button("Ganze Liste in den Korb", Color3.fromRGB(70, 70, 80))
+bulkAllBtn.Visible = false
 -- Bulk-Ergebnisse. Vorschau lädt erst beim Anklicken, sonst laggt Studio bei vielen Assets.
 local results = add(Instance.new("Frame"))
 results.Size = UDim2.new(1, 0, 0, 0)
@@ -336,7 +363,7 @@ local function load(q)
 	if q:match("^%s*$") then return end
 	loadBtn.Active, loadBtn.Text = false, "Lade …"
 	status.TextColor3, status.Text = MUTED, "Lade … Hängt es? Plugins > Plugins verwalten > Asset Downloader: HTTP-Zugriff auf 127.0.0.1 erlauben."
-	savedLabel.Text, row.Visible = "", false
+	savedLabel.Text, row.Visible, row2.Visible = "", false, false
 	local url = ("%s/api/plugin?q=%s&place=%s"):format(SERVER, HttpService:UrlEncode(q), HttpService:UrlEncode(placeBox.Text))
 	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "GET" })
 	loadBtn.Active, loadBtn.Text = true, "Laden"
@@ -385,7 +412,7 @@ local function load(q)
 	end
 
 	status.TextColor3, status.Text = OK, ("%s: %s%s"):format(kind ~= "" and kind or "Asset", loaded.name, #loaded.objects == 0 and ext:match("^rbxm") and " (Vorschau nicht möglich)" or "")
-	savedLabel.Text = "Gespeichert: " .. urlDecode(header(res, "x-saved"))
+	row2.Visible = true
 	insertBtn.Visible = #loaded.objects > 0
 	playBtn.Visible = loaded.clip ~= nil or loaded.sound ~= nil
 	row.Visible = insertBtn.Visible or playBtn.Visible
@@ -428,13 +455,66 @@ local function insert()
 	status.TextColor3, status.Text = OK, "Eingefügt in " .. placed[1].Parent:GetFullName()
 end
 
+local cart, bulkItems = {}, {}
+
+local function listButton(text, parent)
+	local b = button(text, FIELD, parent)
+	b.Font, b.TextSize = Enum.Font.Gotham, 13
+	b.TextXAlignment, b.TextTruncate = Enum.TextXAlignment.Left, Enum.TextTruncate.AtEnd
+	Instance.new("UIPadding", b).PaddingLeft = UDim.new(0, 8)
+	return b
+end
+
+local function refreshCart()
+	for _, child in cartList:GetChildren() do
+		if child:IsA("GuiObject") then child:Destroy() end
+	end
+	for i, item in cart do
+		local b = listButton(("x  %s: %s"):format(item.kind ~= "" and item.kind or "Asset", item.name), cartList)
+		b.LayoutOrder = i
+		b.Activated:Connect(function()
+			table.remove(cart, table.find(cart, item))
+			refreshCart()
+		end)
+	end
+	cartTitle.Text = #cart == 0 and "Korb ist leer" or ("Korb (%d), anklicken entfernt"):format(#cart)
+	folderBox.Visible, cartBtn.Visible = #cart > 0, #cart > 0
+end
+
+local function addToCart(id, name, kind)
+	for _, item in cart do
+		if item.id == id then return end
+	end
+	table.insert(cart, { id = id, name = name, kind = kind })
+	refreshCart()
+end
+
+-- Lädt die IDs neu von Roblox und speichert sie über den Server in downloads/ (oder downloads/<folder>).
+local function save(ids, folder, btn, idleText)
+	btn.Active, btn.Text = false, "Speichere …"
+	local url = ("%s/api/plugin-save?place=%s&folder=%s"):format(SERVER, HttpService:UrlEncode(placeBox.Text), HttpService:UrlEncode(folder))
+	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "POST", Body = table.concat(ids, "\n") })
+	btn.Active, btn.Text = true, idleText
+	if not ok or not res.Success then
+		status.TextColor3, status.Text = BAD, "Speichern fehlgeschlagen. Läuft start.bat?"
+		return nil
+	end
+	local r = HttpService:JSONDecode(res.Body)
+	local lines = { ("%d/%d gespeichert in %s"):format(r.saved, r.total, r.folder) }
+	for _, e in r.errors do
+		table.insert(lines, ("%s: %s"):format(e.id, e.error))
+	end
+	savedLabel.Text = table.concat(lines, "\n")
+	return r
+end
+
 local function loadBulk()
 	local text = bulkBox.Text
 	if text:match("^%s*$") or not bulkBtn.Active then return end
-	bulkBtn.Active, bulkBtn.Text = false, "Lade alle … (kann dauern)"
+	bulkBtn.Active, bulkBtn.Text = false, "Lade Liste …"
 	local url = ("%s/api/plugin-bulk?place=%s"):format(SERVER, HttpService:UrlEncode(placeBox.Text))
 	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "POST", Body = text })
-	bulkBtn.Active, bulkBtn.Text = true, "Alle laden"
+	bulkBtn.Active, bulkBtn.Text = true, "Liste laden"
 	if not ok or not res.Success then
 		local okJson, body = pcall(HttpService.JSONDecode, HttpService, ok and res.Body or "")
 		status.TextColor3, status.Text = BAD, okJson and body.error or "Server nicht erreichbar. start.bat starten."
@@ -443,30 +523,49 @@ local function loadBulk()
 	for _, child in results:GetChildren() do
 		if child:IsA("GuiObject") then child:Destroy() end
 	end
-	local items, count = HttpService:JSONDecode(res.Body), 0
-	for i, item in items do
-		local b = button(("%s: %s"):format(item.type ~= "" and item.type or "Asset", item.name), FIELD, results)
-		b.LayoutOrder = i
-		b.Font, b.TextSize = Enum.Font.Gotham, 13
-		b.TextXAlignment, b.TextTruncate = Enum.TextXAlignment.Left, Enum.TextTruncate.AtEnd
-		Instance.new("UIPadding", b).PaddingLeft = UDim.new(0, 8)
-		if item.error ~= nil then
-			b.TextColor3, b.Text = BAD, ("%s: %s"):format(item.id, item.error)
-		else
-			count += 1
-			b.Activated:Connect(function()
-				idBox.Text = item.id
-				root.CanvasPosition = Vector2.zero
-				load(item.id)
-			end)
-		end
+	bulkItems = HttpService:JSONDecode(res.Body)
+	for i, item in bulkItems do
+		local line = Instance.new("Frame")
+		line.Size, line.BackgroundTransparency, line.LayoutOrder = UDim2.new(1, 0, 0, 34), 1, i
+		line.Parent = results
+		local b = listButton(("%s: %s"):format(item.type ~= "" and item.type or "Asset", item.name), line)
+		b.Size = UDim2.new(1, -42, 1, 0)
+		b.Activated:Connect(function()
+			idBox.Text = item.id
+			root.CanvasPosition = Vector2.zero
+			load(item.id)
+		end)
+		local plus = button("+", Color3.fromRGB(70, 70, 80), line)
+		plus.Size, plus.Position = UDim2.new(0, 34, 1, 0), UDim2.new(1, -34, 0, 0)
+		plus.Activated:Connect(function() addToCart(item.id, item.name, item.type) end)
 	end
-	status.TextColor3, status.Text = OK, ("%d/%d geladen und in downloads/ gespeichert. Anklicken für Vorschau."):format(count, #items)
+	bulkAllBtn.Visible = #bulkItems > 0
+	status.TextColor3, status.Text = OK, ("%d Assets gefunden. Anklicken für Vorschau, + legt in den Korb."):format(#bulkItems)
 end
 
 loadBtn.Activated:Connect(function() if loadBtn.Active then load(idBox.Text) end end)
 idBox.FocusLost:Connect(function(enter) if enter then load(idBox.Text) end end)
 bulkBtn.Activated:Connect(loadBulk)
+cartAddBtn.Activated:Connect(function()
+	if loaded then addToCart(loaded.id, loaded.name, loaded.kind) end
+end)
+downloadBtn.Activated:Connect(function()
+	if loaded and downloadBtn.Active then save({ loaded.id }, "", downloadBtn, "Herunterladen") end
+end)
+bulkAllBtn.Activated:Connect(function()
+	for _, item in bulkItems do addToCart(item.id, item.name, item.type) end
+end)
+cartBtn.Activated:Connect(function()
+	if #cart == 0 or not cartBtn.Active then return end
+	local ids = {}
+	for _, item in cart do table.insert(ids, item.id) end
+	local folder = folderBox.Text:match("^%s*(.-)%s*$")
+	local r = save(ids, folder ~= "" and folder or "Korb " .. os.date("%Y-%m-%d %H-%M"), cartBtn, "Korb herunterladen")
+	if r and #r.errors == 0 then
+		table.clear(cart)
+		refreshCart()
+	end
+end)
 insertBtn.Activated:Connect(insert)
 playBtn.Activated:Connect(playToggle)
 widget:GetPropertyChangedSignal("Enabled"):Connect(function() if not widget.Enabled then stopPreview() end end)

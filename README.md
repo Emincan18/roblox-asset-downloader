@@ -49,7 +49,9 @@ Kleines Fenster direkt in Studio: Asset laden, Vorschau ansehen, ins Spiel einf�
 - Models drehen sich in der Vorschau. Maus ziehen dreht, Mausrad zoomt. Animationen laufen auf einem Dummy (R6 oder R15, je nach Animation). Ist ein eigener Rig im Workspace ausgewählt, spielt sie auf dem.
 - **Einfügen** setzt Models in den Workspace. Animationen landen in `AnimSaves` des ausgewählten Rigs (dann öffnet sie der Animation Editor), sonst in `ServerStorage`.
 - Audio, Bilder und Meshes zeigen das Roblox-Vorschaubild.
-- Jede geladene Datei liegt zusätzlich in `downloads/`.
+- **Herunterladen** speichert das Asset in `downloads/`.
+- **In den Korb** sammelt Assets, während du dir die Vorschauen ansiehst. **Korb herunterladen** speichert alles in `downloads/<Ordnername>/`.
+- **Bulk:** Viele IDs untereinander einfügen, **Liste laden**. Klick auf einen Eintrag zeigt die Vorschau, `+` legt ihn in den Korb.
 
 ### Kommandozeile
 

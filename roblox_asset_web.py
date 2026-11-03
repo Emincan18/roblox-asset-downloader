@@ -78,7 +78,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(502, err)
             self.send(200, data, "application/octet-stream", file_name(ids[0], data))
         elif url.path == "/api/plugin":
-            # Für das Studio-Plugin: speichert in downloads/ und liefert die Bytes plus Typ zur Vorschau.
+            # Für die Vorschau im Studio-Plugin: liefert Bytes plus Name und Typ, speichert nichts.
             ids = extract_ids(q.get("q", [""])[0], bare=True)
             if not ids:
                 return self.error(400, "Keine gültige Asset-ID gefunden.")
@@ -86,23 +86,22 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 return self.error(502, err)
             name, kind = asset_info(ids[0])
-            path = DOWNLOADS / file_name(ids[0], data, name)
-            DOWNLOADS.mkdir(exist_ok=True)
-            path.write_bytes(data)
-            self.send(200, data, "application/octet-stream", path.name,
-                      {"X-Id": ids[0], "X-Name": urllib.parse.quote(name), "X-Type": kind, "X-Ext": guess_ext(data), "X-Saved": urllib.parse.quote(str(path))})
+            self.send(200, data, "application/octet-stream", file_name(ids[0], data, name),
+                      {"X-Id": ids[0], "X-Name": urllib.parse.quote(name), "X-Type": kind, "X-Ext": guess_ext(data)})
         else:
             self.error(404, "Nicht gefunden")
 
     def do_POST(self):
         url = urllib.parse.urlparse(self.path)
-        if url.path not in ("/api/bulk", "/api/plugin-bulk"):
+        if url.path not in ("/api/bulk", "/api/plugin-bulk", "/api/plugin-save"):
             return self.error(404, "Nicht gefunden")
         place = parse_place(urllib.parse.parse_qs(url.query).get("place", [""])[0])
         text = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8", "ignore")
         ids = extract_ids(text, bare=True)
         if ids and url.path == "/api/plugin-bulk":
-            return self.plugin_bulk(ids, place)
+            return self.plugin_bulk(ids)
+        if ids and url.path == "/api/plugin-save":
+            return self.plugin_save(ids, place, urllib.parse.parse_qs(url.query).get("folder", [""])[0])
         if not ids:
             return self.error(400, "Keine gültigen Asset-IDs gefunden.")
         results = fetch_many(ids, load_cookie(), place)
@@ -122,19 +121,28 @@ class Handler(BaseHTTPRequestHandler):
             z.writestr("report.csv", "﻿" + report.getvalue())  # BOM, damit Excel Umlaute erkennt
         self.send(200, buf.getvalue(), "application/zip", f"roblox-assets-{ok}.zip", {"X-Result": f"{ok}/{len(ids)}"})
 
-    def plugin_bulk(self, ids, place):
-        """Für das Studio-Plugin: alle in downloads/ speichern, nur die Liste mit Namen zurückgeben.
-        Die Vorschau lädt das Plugin erst beim Anklicken über /api/plugin."""
-        results = fetch_many(ids, load_cookie(), place)
+    def plugin_bulk(self, ids):
+        """Für das Studio-Plugin: nur Namen und Typen, damit die Liste schnell da ist.
+        Vorschau und Download holt das Plugin erst auf Klick."""
         with ThreadPoolExecutor(max_workers=6) as pool:
             infos = list(pool.map(asset_info, ids))
-        DOWNLOADS.mkdir(exist_ok=True)
-        items = []
-        for (asset_id, data, err), (name, kind) in zip(results, infos):
-            if not err:
-                (DOWNLOADS / file_name(asset_id, data, name)).write_bytes(data)
-            items.append({"id": asset_id, "name": name or asset_id, "type": kind, "error": err})
-        self.send(200, json.dumps(items).encode())
+        self.send(200, json.dumps([{"id": i, "name": n or i, "type": k} for i, (n, k) in zip(ids, infos)]).encode())
+
+    def plugin_save(self, ids, place, folder):
+        """Für das Studio-Plugin: Assets in downloads/ oder einen Unterordner davon speichern."""
+        folder = re.sub(r'[\\/:*?"<>|]+', "", folder).strip(" .")[:60]  # kein Pfad raus aus downloads/
+        out = DOWNLOADS / folder if folder else DOWNLOADS
+        out.mkdir(parents=True, exist_ok=True)
+        results = fetch_many(ids, load_cookie(), place)
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            names = [n for n, _ in pool.map(asset_info, ids)]
+        errors = []
+        for (asset_id, data, err), name in zip(results, names):
+            if err:
+                errors.append({"id": asset_id, "error": err})
+            else:
+                (out / file_name(asset_id, data, name)).write_bytes(data)
+        self.send(200, json.dumps({"saved": len(ids) - len(errors), "total": len(ids), "folder": str(out), "errors": errors}).encode())
 
     def log_message(self, *args):
         pass  # Konsole ruhig halten
