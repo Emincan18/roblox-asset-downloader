@@ -11,6 +11,7 @@ import csv
 import io
 import json
 import re
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -187,7 +188,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = bytes.fromhex(text.strip())
             except ValueError:
                 return self.error(400, "Datei kaputt angekommen.")
-            path = safe_dir(folder) / f"{safe_name(folder) or 'auswahl'}.rbxm"
+            file = safe_name(urllib.parse.parse_qs(url.query).get("file", [""])[0])
+            path = safe_dir(folder) / (file or f"{safe_name(folder) or 'auswahl'}.rbxm")
             path.write_bytes(data)
             return self.send(200, json.dumps({"path": str(path)}).encode())
         ids = extract_ids(text, bare=True)
@@ -355,5 +357,6 @@ if __name__ == "__main__":
         raise SystemExit("Läuft schon in einem anderen Fenster. Browser wurde geöffnet.")
     url = f"http://127.0.0.1:{PORT}"
     print(f"Roblox Asset Downloader läuft auf {url}  (Strg+C beendet)")
-    webbrowser.open(url)
+    if "--no-browser" not in sys.argv:  # z. B. beim Neustart nur fürs Studio-Plugin
+        webbrowser.open(url)
     server.serve_forever()
