@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -89,17 +90,19 @@ class Handler(BaseHTTPRequestHandler):
             DOWNLOADS.mkdir(exist_ok=True)
             path.write_bytes(data)
             self.send(200, data, "application/octet-stream", path.name,
-                      {"X-Id": ids[0], "X-Type": kind, "X-Ext": guess_ext(data), "X-Saved": urllib.parse.quote(str(path))})
+                      {"X-Id": ids[0], "X-Name": urllib.parse.quote(name), "X-Type": kind, "X-Ext": guess_ext(data), "X-Saved": urllib.parse.quote(str(path))})
         else:
             self.error(404, "Nicht gefunden")
 
     def do_POST(self):
         url = urllib.parse.urlparse(self.path)
-        if url.path != "/api/bulk":
+        if url.path not in ("/api/bulk", "/api/plugin-bulk"):
             return self.error(404, "Nicht gefunden")
         place = parse_place(urllib.parse.parse_qs(url.query).get("place", [""])[0])
         text = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8", "ignore")
         ids = extract_ids(text, bare=True)
+        if ids and url.path == "/api/plugin-bulk":
+            return self.plugin_bulk(ids, place)
         if not ids:
             return self.error(400, "Keine gültigen Asset-IDs gefunden.")
         results = fetch_many(ids, load_cookie(), place)
@@ -118,6 +121,20 @@ class Handler(BaseHTTPRequestHandler):
                 ok += 1
             z.writestr("report.csv", "﻿" + report.getvalue())  # BOM, damit Excel Umlaute erkennt
         self.send(200, buf.getvalue(), "application/zip", f"roblox-assets-{ok}.zip", {"X-Result": f"{ok}/{len(ids)}"})
+
+    def plugin_bulk(self, ids, place):
+        """Für das Studio-Plugin: alle in downloads/ speichern, nur die Liste mit Namen zurückgeben.
+        Die Vorschau lädt das Plugin erst beim Anklicken über /api/plugin."""
+        results = fetch_many(ids, load_cookie(), place)
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            infos = list(pool.map(asset_info, ids))
+        DOWNLOADS.mkdir(exist_ok=True)
+        items = []
+        for (asset_id, data, err), (name, kind) in zip(results, infos):
+            if not err:
+                (DOWNLOADS / file_name(asset_id, data, name)).write_bytes(data)
+            items.append({"id": asset_id, "name": name or asset_id, "type": kind, "error": err})
+        self.send(200, json.dumps(items).encode())
 
     def log_message(self, *args):
         pass  # Konsole ruhig halten

@@ -10,6 +10,8 @@ local Selection = game:GetService("Selection")
 local SerializationService = game:GetService("SerializationService")
 local AnimationClipProvider = game:GetService("AnimationClipProvider")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
+local AssetService = game:GetService("AssetService")
+local SoundService = game:GetService("SoundService")
 local Players = game:GetService("Players")
 
 local SERVER = "http://127.0.0.1:8765"
@@ -118,6 +120,13 @@ local placeBox = input("roblox.com/games/...")
 placeBox.Text = plugin:GetSetting("place") or ""
 placeBox.FocusLost:Connect(function() plugin:SetSetting("place", placeBox.Text) end)
 local loadBtn = button("Laden", ACCENT)
+label("Bulk: mehrere IDs oder Links, eine pro Zeile")
+local bulkBox = input("507766388\n180435571\n...")
+bulkBox.MultiLine, bulkBox.TextWrapped = true, true
+bulkBox.TextYAlignment = Enum.TextYAlignment.Top
+bulkBox.Size = UDim2.new(1, 0, 0, 90)
+bulkBox:FindFirstChildOfClass("UIPadding").PaddingTop = UDim.new(0, 6)
+local bulkBtn = button("Alle laden", Color3.fromRGB(70, 70, 80))
 local status = label("Server muss laufen: start.bat doppelklicken.")
 
 local view = add(corner(Instance.new("ViewportFrame")))
@@ -129,11 +138,12 @@ local camera = Instance.new("Camera")
 camera.FieldOfView = 40
 camera.Parent = view
 view.CurrentCamera = camera
-local thumb = Instance.new("ImageLabel")
-thumb.Size = UDim2.fromScale(1, 1)
-thumb.BackgroundTransparency = 1
+-- Eigenes Feld statt Kind des ViewportFrames, damit es sicher gezeichnet wird.
+local thumb = add(corner(Instance.new("ImageLabel")))
+thumb.Size = UDim2.new(1, 0, 0, 240)
+thumb.BackgroundColor3 = FIELD
 thumb.ScaleType = Enum.ScaleType.Fit
-thumb.Parent = view
+thumb.Visible = false
 label("Maus ziehen dreht die Vorschau, Mausrad zoomt.")
 
 local row = add(Instance.new("Frame"))
@@ -149,6 +159,12 @@ playBtn.Size = UDim2.new(0.5, -4, 1, 0)
 row.Visible = false
 
 local savedLabel = label("")
+-- Bulk-Ergebnisse. Vorschau lädt erst beim Anklicken, sonst laggt Studio bei vielen Assets.
+local results = add(Instance.new("Frame"))
+results.Size = UDim2.new(1, 0, 0, 0)
+results.AutomaticSize = Enum.AutomaticSize.Y
+results.BackgroundTransparency = 1
+Instance.new("UIListLayout", results).Padding = UDim.new(0, 4)
 
 -- Vorschau ---------------------------------------------------------------------------------
 
@@ -159,6 +175,7 @@ local function stopPreview()
 	if stepConn then stepConn:Disconnect() stepConn = nil end
 	if track then track:Stop(0) track = nil end
 	animator = nil
+	if loaded and loaded.sound then loaded.sound:Stop() end
 	if world then world:Destroy() world = nil end
 	playBtn.Text = "Abspielen"
 end
@@ -250,6 +267,17 @@ local function previewAnimation(clip)
 end
 
 local function playToggle()
+	local sound = loaded and loaded.sound
+	if sound then
+		if sound.IsPlaying then
+			sound:Stop()
+			playBtn.Text = "Abspielen"
+		else
+			SoundService:PlayLocalSound(sound) -- spielt auch im Edit-Modus
+			playBtn.Text = "Stopp"
+		end
+		return
+	end
 	if not track then return end
 	if stepConn then
 		stepConn:Disconnect() stepConn = nil
@@ -264,7 +292,7 @@ end
 
 local function showPreview()
 	stopPreview()
-	thumb.Image = ""
+	thumb.Image, thumb.Visible, view.Visible = "", false, true
 	world = Instance.new("WorldModel")
 	world.Parent = view
 	local clip = loaded.clip
@@ -279,8 +307,15 @@ local function showPreview()
 	if #world:GetDescendants() > 0 and select(2, world:GetBoundingBox()).Magnitude > 0 then
 		frameCamera(true)
 	else
-		-- Audio, Bild, Mesh: Roblox-Vorschaubild statt 3D.
-		thumb.Image = ("rbxthumb://type=Asset&id=%s&w=420&h=420"):format(loaded.id)
+		-- Bild direkt anzeigen, Decal über seine Textur, sonst (Audio, Mesh) das Roblox-Vorschaubild.
+		local decal = nil
+		for _, obj in loaded.objects do
+			if obj:IsA("Decal") then decal = obj break end
+		end
+		thumb.Image = loaded.kind == "Image" and "rbxassetid://" .. loaded.id
+			or decal and decal.Texture
+			or ("rbxthumb://type=Asset&id=%s&w=420&h=420"):format(loaded.id)
+		thumb.Visible, view.Visible = true, false
 	end
 end
 
@@ -297,8 +332,7 @@ local function header(res, name)
 	return ""
 end
 
-local function load()
-	local q = idBox.Text
+local function load(q)
 	if q:match("^%s*$") then return end
 	loadBtn.Active, loadBtn.Text = false, "Lade …"
 	status.TextColor3, status.Text = MUTED, "Lade … Hängt es? Plugins > Plugins verwalten > Asset Downloader: HTTP-Zugriff auf 127.0.0.1 erlauben."
@@ -317,7 +351,9 @@ local function load()
 	end
 
 	local id, kind, ext = header(res, "x-id"), header(res, "x-type"), header(res, "x-ext")
-	loaded = { id = id, objects = {} }
+	local name = urlDecode(header(res, "x-name"))
+	if loaded and loaded.sound then loaded.sound:Destroy() end
+	loaded = { id = id, kind = kind, name = name ~= "" and name or id, objects = {} }
 	if ext == "rbxm" or ext == "rbxmx" then
 		local okDes, objs = pcall(SerializationService.DeserializeInstancesAsync, SerializationService, buffer.fromstring(res.Body))
 		if okDes then
@@ -330,11 +366,28 @@ local function load()
 		end
 	end
 
-	local name = urlDecode(header(res, "x-filename"))
-	status.TextColor3, status.Text = OK, ("%s geladen%s"):format(kind ~= "" and kind or "Asset", #loaded.objects == 0 and ext:match("^rbxm") and " (Vorschau nicht möglich)" or "")
+	if ext == "mesh" then
+		-- Rohe .mesh-Dateien kann Studio nicht aus Bytes lesen, also über die Asset-ID als MeshPart laden.
+		local okMesh, part = pcall(AssetService.CreateMeshPartAsync, AssetService, "rbxassetid://" .. id)
+		if not okMesh then
+			part = Instance.new("Part")
+			local mesh = Instance.new("SpecialMesh", part)
+			mesh.MeshType, mesh.MeshId = Enum.MeshType.FileMesh, "rbxassetid://" .. id
+		end
+		part.Name, part.Anchored, part.Color = loaded.name, true, Color3.fromRGB(200, 200, 205)
+		loaded.objects = { part }
+	elseif kind == "Audio" or ext == "ogg" or ext == "mp3" or ext == "wav" or ext == "flac" then
+		local sound = Instance.new("Sound")
+		sound.Name, sound.SoundId = loaded.name, "rbxassetid://" .. id
+		sound.Ended:Connect(function() playBtn.Text = "Abspielen" end)
+		sound.Parent = widget
+		loaded.sound, loaded.objects = sound, { sound }
+	end
+
+	status.TextColor3, status.Text = OK, ("%s: %s%s"):format(kind ~= "" and kind or "Asset", loaded.name, #loaded.objects == 0 and ext:match("^rbxm") and " (Vorschau nicht möglich)" or "")
 	savedLabel.Text = "Gespeichert: " .. urlDecode(header(res, "x-saved"))
 	insertBtn.Visible = #loaded.objects > 0
-	playBtn.Visible = loaded.clip ~= nil
+	playBtn.Visible = loaded.clip ~= nil or loaded.sound ~= nil
 	row.Visible = insertBtn.Visible or playBtn.Visible
 	showPreview()
 end
@@ -358,7 +411,7 @@ local function insert()
 			target = saves
 		end
 		local copy = loaded.clip:Clone()
-		copy.Name = ("Animation %s"):format(loaded.id)
+		copy.Name = loaded.name
 		copy.Parent = target
 		table.insert(placed, copy)
 	else
@@ -375,8 +428,45 @@ local function insert()
 	status.TextColor3, status.Text = OK, "Eingefügt in " .. placed[1].Parent:GetFullName()
 end
 
-loadBtn.Activated:Connect(function() if loadBtn.Active then load() end end)
-idBox.FocusLost:Connect(function(enter) if enter then load() end end)
+local function loadBulk()
+	local text = bulkBox.Text
+	if text:match("^%s*$") or not bulkBtn.Active then return end
+	bulkBtn.Active, bulkBtn.Text = false, "Lade alle … (kann dauern)"
+	local url = ("%s/api/plugin-bulk?place=%s"):format(SERVER, HttpService:UrlEncode(placeBox.Text))
+	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Method = "POST", Body = text })
+	bulkBtn.Active, bulkBtn.Text = true, "Alle laden"
+	if not ok or not res.Success then
+		local okJson, body = pcall(HttpService.JSONDecode, HttpService, ok and res.Body or "")
+		status.TextColor3, status.Text = BAD, okJson and body.error or "Server nicht erreichbar. start.bat starten."
+		return
+	end
+	for _, child in results:GetChildren() do
+		if child:IsA("GuiObject") then child:Destroy() end
+	end
+	local items, count = HttpService:JSONDecode(res.Body), 0
+	for i, item in items do
+		local b = button(("%s: %s"):format(item.type ~= "" and item.type or "Asset", item.name), FIELD, results)
+		b.LayoutOrder = i
+		b.Font, b.TextSize = Enum.Font.Gotham, 13
+		b.TextXAlignment, b.TextTruncate = Enum.TextXAlignment.Left, Enum.TextTruncate.AtEnd
+		Instance.new("UIPadding", b).PaddingLeft = UDim.new(0, 8)
+		if item.error ~= nil then
+			b.TextColor3, b.Text = BAD, ("%s: %s"):format(item.id, item.error)
+		else
+			count += 1
+			b.Activated:Connect(function()
+				idBox.Text = item.id
+				root.CanvasPosition = Vector2.zero
+				load(item.id)
+			end)
+		end
+	end
+	status.TextColor3, status.Text = OK, ("%d/%d geladen und in downloads/ gespeichert. Anklicken für Vorschau."):format(count, #items)
+end
+
+loadBtn.Activated:Connect(function() if loadBtn.Active then load(idBox.Text) end end)
+idBox.FocusLost:Connect(function(enter) if enter then load(idBox.Text) end end)
+bulkBtn.Activated:Connect(loadBulk)
 insertBtn.Activated:Connect(insert)
 playBtn.Activated:Connect(playToggle)
 widget:GetPropertyChangedSignal("Enabled"):Connect(function() if not widget.Enabled then stopPreview() end end)
