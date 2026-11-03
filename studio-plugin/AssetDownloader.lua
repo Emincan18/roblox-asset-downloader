@@ -823,17 +823,33 @@ local function addToCart(id, name, kind)
 	refreshCart()
 end
 
+-- Knopftext mit Fortschritt, z. B. "Speichere 40% (4/10) …".
+local function progress(verb, done, total)
+	return ("%s %d%% (%d/%d) …"):format(verb, math.floor(done / total * 100), done, total)
+end
+
 -- Lädt die IDs neu von Roblox und speichert sie über den Server in downloads/ (oder downloads/<folder>).
+-- In Paketen, damit der Knopf zeigt, wie weit es ist.
+local SAVE_BATCH = 5
 local function save(ids, folder, btn, idleText)
-	btn.Active, btn.Text = false, "Speichere …"
+	btn.Active = false
 	local url = ("%s/api/plugin-save?place=%s&folder=%s"):format(SERVER, HttpService:UrlEncode(placeBox.Text), HttpService:UrlEncode(folder))
-	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="POST", Body = table.concat(ids, "\n") })
-	btn.Active, btn.Text = true, idleText
-	if not ok or not res.Success then
-		status.TextColor3, status.Text = BAD, "Speichern fehlgeschlagen. Läuft start.bat?"
-		return nil
+	local r = { saved = 0, total = #ids, folder = folder, errors = {} }
+	for first = 1, #ids, SAVE_BATCH do
+		btn.Text = progress("Speichere", first - 1, #ids)
+		local batch = table.move(ids, first, math.min(first + SAVE_BATCH - 1, #ids), 1, {})
+		local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="POST", Body = table.concat(batch, "\n") })
+		if not ok or not res.Success then
+			btn.Active, btn.Text = true, idleText
+			status.TextColor3, status.Text = BAD, "Speichern fehlgeschlagen. Läuft start.bat?"
+			return nil
+		end
+		local part = HttpService:JSONDecode(res.Body)
+		r.saved += part.saved
+		r.folder = part.folder
+		table.move(part.errors, 1, #part.errors, #r.errors + 1, r.errors)
 	end
-	local r = HttpService:JSONDecode(res.Body)
+	btn.Active, btn.Text = true, idleText
 	local lines = { ("%d/%d gespeichert in %s"):format(r.saved, r.total, r.folder) }
 	for _, e in r.errors do
 		table.insert(lines, ("%s: %s"):format(e.id, e.error))
@@ -887,7 +903,7 @@ local function repairTextures(found, ids, btn)
 	local map = plugin:GetSetting("repaired") or {}
 	local errors, done = {}, 0
 	for i, id in ids do
-		btn.Text = ("Lade hoch %d/%d …"):format(i, #ids)
+		btn.Text = progress("Lade hoch", i - 1, #ids)
 		if not map[id] then
 			local newId, err = reupload(id)
 			if newId then map[id] = newId else table.insert(errors, id .. ": " .. err) end
@@ -1528,7 +1544,7 @@ local function uploadImages(items, btn, idleText)
 	local lines, okCount = {}, 0
 	btn.Active = false
 	for i, item in items do
-		btn.Text = ("Lade hoch %d/%d …"):format(i, #items)
+		btn.Text = progress("Lade hoch", i - 1, #items)
 		local newId, err = map[item.id], nil
 		if not newId then newId, err = reupload(item.id) end
 		if newId then
