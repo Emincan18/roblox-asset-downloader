@@ -282,7 +282,7 @@ placeBox.FocusLost:Connect(function() plugin:SetSetting("place", placeBox.Text) 
 local loadBtn = button("Laden", ACCENT,
 	"Gib eine Asset-ID oder einen Link ein und drück Laden. Du siehst dann Name, Typ und eine Vorschau. Gespeichert wird noch nichts.\n\nSpiel-Link: Manche Animationen und Sounds gibt Roblox nur im Kontext ihres Spiels heraus. Dann hier den Link des Spiels eintragen.")
 local pickBtn = button("Aus Explorer-Auswahl", BLUE,
-	"Klick im Explorer eine Animation, einen Sound, Emitter, Mesh oder ein Bild an und drück diesen Knopf. Die ID wird automatisch eingetragen und geladen.\n\nIst ein ganzer Ordner (z. B. eine VFX) ausgewählt, kommen alle IDs darin als Liste in den Tab Bulk.")
+	"Klick im Explorer eine Animation, einen Sound, Emitter, Mesh oder ein Bild an und drück diesen Knopf. Die ID wird automatisch eingetragen und geladen.\n\nEine Animationsdatei ohne ID (KeyframeSequence, z. B. per Insert from File eingefügt) kommt direkt in die Vorschau.\n\nIst ein ganzer Ordner (z. B. eine VFX) ausgewählt, kommen alle IDs darin als Liste in den Tab Bulk.")
 
 previewCard = card("Vorschau")
 previewOrder = previewCard.LayoutOrder
@@ -304,7 +304,7 @@ thumb.Visible = false
 label("Maus ziehen dreht, Mausrad zoomt.")
 
 local row, insertBtn, playBtn = buttonRow(
-	"Platzieren setzt das Asset 12 Studs vor deine Kamera, mit allen Einstellungen und Unterordnern. Animationen kommen in AnimSaves des ausgewählten Rigs, sonst in ServerStorage.\n\nAbspielen startet Animation oder Sound. Bei VFX löst es die platzierten Emitter aus (erst Platzieren).",
+	"Platzieren setzt das Asset 12 Studs vor deine Kamera, mit allen Einstellungen und Unterordnern. Animationen kommen in AnimSaves des ausgewählten Rigs, sonst in ServerStorage.\n\nAbspielen: Animationen laufen auf einem Dummy 12 Studs vor deiner Kamera (ist ein Rig ausgewählt, auf einer Kopie davon). Nochmal drücken entfernt ihn. Sounds spielen ab. Bei VFX löst es die platzierten Emitter aus (erst Platzieren).",
 	"Platzieren", BLUE, "Abspielen", GREY)
 row.Visible = false
 local row2, cartAddBtn, downloadBtn = buttonRow(
@@ -360,11 +360,18 @@ local playSelBtn = button("Auswahl abspielen", BLUE,
 	"Löst alle ParticleEmitter der Auswahl einmal aus (mit EmitCount und EmitDelay, falls gesetzt). Hit-VFX sieht man sonst nicht, weil sie nur per Script feuern.\n\nSpielt immer als Kopie 12 Studs vor deiner Kamera, egal ob die VFX im Workspace, in ReplicatedStorage oder in einem Script liegt. Das Original bleibt unverändert, du kannst beliebig oft abspielen.")
 local vfxLabel = label("")
 
+card("Animations-Ordner", "Ordner mit Animationen im Explorer anklicken, z. B. Anubis mit Abilities und Attack.")
+-- Eine Tabelle statt mehrerer locals: Luau erlaubt höchstens 200 lokale Variablen pro Funktion.
+local animUi = {}
+animUi.row, animUi.save, animUi.upload = buttonRow("Herunterladen speichert die Auswahl als eine Datei nach downloads/<Name>/<Name>.rbxm, mit allen Unterordnern und Namen genau wie im Explorer (z. B. Anubis > Abilities > Barrage, Anubis > Attack > M1).\n\nIn der Datei liegt jede Animation als KeyframeSequence mit ihrem Namen, ohne Asset-ID, so wie aus dem Animation Editor gespeichert. So kannst du sie in jeder Place ansehen und bearbeiten. Lässt sich eine nicht laden, bleibt sie als Animation mit ID drin und steht in der Fehlerliste.\n\nUnter meiner ID, Ordner mit KeyframeSequences (z. B. aus Herunterladen eingefügt): lädt alle auf einmal unter deinem Account hoch. Danach steckt jede KeyframeSequence in einer Animation mit deiner neuen ID, gleicher Name, gleicher Ort. Kein Rechtsklick > Save to Roblox pro Animation nötig. Strg+Z macht es rückgängig.\n\nUnter meiner ID, Ordner mit Animationen aus einem Spiel (fremde IDs): lädt jede Animation unter deinem Account hoch (und Bilder, falls welche drin sind) und speichert eine Datei, in der die Animation-Objekte deine neuen IDs haben, jeweils mit der KeyframeSequence darin. Dann laufen die Animationen in deinen eigenen Spielen. Datei: downloads/<Name> (meine IDs)/. Schon hochgeladene Animationen werden nicht doppelt hochgeladen. Braucht apikey.txt mit Assets Read + Write.\n\nIn der anderen Place: Rechtsklick > Insert from File und die .rbxm wählen.",
+	"Herunterladen", GREEN, "Unter meiner ID", PURPLE)
+animUi.label = label("")
+
 card("Zu anderer Place", "Auswahl in einer Place senden, in einer anderen Place empfangen. Beide brauchen dieses Plugin und start.bat.")
-local _, sendBtn, receiveBtn = buttonRow("Senden speichert die Explorer-Auswahl beim lokalen Server (downloads/_senden/), mit dem Ordner, in dem jedes Objekt lag.\n\nEmpfangen in der anderen Place legt alles wieder in denselben Ordner, z. B. ReplicatedStorage > Anims. Fehlt der Ordner dort, landet es im nächsten vorhandenen Ordner darüber. Danach ist es ausgewählt, Strg+Z macht es rückgängig.\n\nGesendet bleibt gesendet, bis du etwas Neues sendest. Du kannst also in mehreren Places empfangen.",
-	"Auswahl senden", ACCENT, "Hier empfangen", GREEN)
-local _, sendPlaceBtn, receivePlaceBtn = buttonRow("Ganze Place senden nimmt alles mit: Workspace (mit Terrain), Lighting, ReplicatedFirst, ReplicatedStorage, ServerScriptService, ServerStorage, StarterGui, StarterPack, StarterPlayer, SoundService, Teams, Chat, TextChatService und MaterialService, samt Scripts. Dazu die Einstellungen von Lighting (Uhrzeit, Nebel, Farben …), Workspace (Schwerkraft …) und StarterPlayer (Laufen, Springen, Kamera).\n\nGanze Place empfangen ERSETZT den Inhalt dieser Place durch die gesendete. Deshalb zweimal klicken. Strg+Z macht es rückgängig.\n\nNur außerhalb vom Play-Test.",
-	"Place senden", ACCENT, "Place empfangen", BAD)
+local sendBtn, receiveBtn = select(2, buttonRow("Senden speichert die Explorer-Auswahl beim lokalen Server (downloads/_senden/), mit dem Ordner, in dem jedes Objekt lag.\n\nEmpfangen in der anderen Place legt alles wieder in denselben Ordner, z. B. ReplicatedStorage > Anims. Fehlt der Ordner dort, landet es im nächsten vorhandenen Ordner darüber. Danach ist es ausgewählt, Strg+Z macht es rückgängig.\n\nGesendet bleibt gesendet, bis du etwas Neues sendest. Du kannst also in mehreren Places empfangen.",
+	"Auswahl senden", ACCENT, "Hier empfangen", GREEN))
+local sendPlaceBtn, receivePlaceBtn = select(2, buttonRow("Ganze Place senden nimmt alles mit: Workspace (mit Terrain), Lighting, ReplicatedFirst, ReplicatedStorage, ServerScriptService, ServerStorage, StarterGui, StarterPack, StarterPlayer, SoundService, Teams, Chat, TextChatService und MaterialService, samt Scripts. Dazu die Einstellungen von Lighting (Uhrzeit, Nebel, Farben …), Workspace (Schwerkraft …) und StarterPlayer (Laufen, Springen, Kamera).\n\nGanze Place empfangen ERSETZT den Inhalt dieser Place durch die gesendete. Deshalb zweimal klicken. Strg+Z macht es rückgängig.\n\nNur außerhalb vom Play-Test.",
+	"Place senden", ACCENT, "Place empfangen", BAD))
 local transferLabel = label("")
 
 -- Tab: ClientFX ----------------------------------------------------------------------------
@@ -396,8 +403,8 @@ label("1. Optional: Animation im Tab Laden oder Bulk laden.\n2. Effekt-Namen tip
 local sceneFxBox = input("Effekt suchen, z. B. Barrage")
 local sceneFxList = add(autoFrame())
 vlist(sceneFxList, 4)
-local _, sceneStartBtn, sceneStopBtn = buttonRow("Der Effekt-Code wird nicht ausgeführt: In Kopien fehlen ihm die Daten vom Server, deshalb bricht er fast immer ab.\n\nStattdessen liest das Plugin im Code, welche Objekte der Effekt benutzt (z. B. Client Assets > Whitesnake > DirectOrderThrow), setzt Kopien davon an den Dummy und löst ihre Partikel aus, mit EmitCount und EmitDelay.\n\nDu siehst Partikel, Modelle, Beams und Trails. Bewegungen, die der Code macht (fliegende Fäuste, Tweens), siehst du nicht.\n\nStart spielt den letzten Effekt nochmal. Stopp löscht Dummy und Kopien.",
-	"Start", ACCENT, "Stopp", GREY)
+local sceneStartBtn, sceneStopBtn = select(2, buttonRow("Der Effekt-Code wird nicht ausgeführt: In Kopien fehlen ihm die Daten vom Server, deshalb bricht er fast immer ab.\n\nStattdessen liest das Plugin im Code, welche Objekte der Effekt benutzt (z. B. Client Assets > Whitesnake > DirectOrderThrow), setzt Kopien davon an den Dummy und löst ihre Partikel aus, mit EmitCount und EmitDelay.\n\nDu siehst Partikel, Modelle, Beams und Trails. Bewegungen, die der Code macht (fliegende Fäuste, Tweens), siehst du nicht.\n\nStart spielt den letzten Effekt nochmal. Stopp löscht Dummy und Kopien.",
+	"Start", ACCENT, "Stopp", GREY))
 local sceneLabel = label("")
 
 -- Tab: Cutscene ----------------------------------------------------------------------------
@@ -407,8 +414,13 @@ card("Cutscene", "Cutscene-Script im Explorer anklicken (oder den Ordner, in dem
 local csInfo = label("Noch nichts ausgewählt.")
 local csList = add(autoFrame())
 vlist(csList, 4)
-local _, csDownloadBtn, csRepairBtn = buttonRow("Mein Account: lädt vorher jedes Bild der Cutscene (Texturen, Decals, Partikel) unter deinem Account neu hoch, setzt die neuen IDs in die Kopie ein, auch im Script-Code, und lädt dann alles herunter. Braucht apikey.txt. Animationen und Sounds behalten ihre alten IDs, die lädt der Server nicht hoch.\n\nSucht im Code der ausgewählten Scripts alles, was die Cutscene benutzt: Models, Rigs mit AnimationController oder Humanoid, Kameras, Parts, Animationen, Sounds, Remotes und Module. Module, die per require geladen werden, durchsucht es genauso mit.\n\nAlles landet in downloads/<Name>/: <Name>.rbxm mit den Ordnern Code und Objekte (in Studio per Rechtsklick > Insert from File einfügbar), code.lua zum Lesen und jede Animation, jeder Sound und jedes Bild als eigene Datei.\n\nKlick auf eine Zeile in der Liste zeigt das Objekt im Explorer.",
-	"Herunterladen", ACCENT, "Mein Account", PURPLE)
+local csDownloadBtn, csRepairBtn = select(2, buttonRow("Mein Account: lädt vorher jedes Bild der Cutscene (Texturen, Decals, Partikel) unter deinem Account neu hoch, setzt die neuen IDs in die Kopie ein, auch im Script-Code, und lädt dann alles herunter. Braucht apikey.txt. Animationen und Sounds behalten ihre alten IDs, die lädt der Server nicht hoch.\n\nSucht im Code der ausgewählten Scripts alles, was die Cutscene benutzt: Models, Rigs mit AnimationController oder Humanoid, Kameras, Parts, Animationen, Sounds, Remotes und Module. Module, die per require geladen werden, durchsucht es genauso mit.\n\nAlles landet in downloads/<Name>/: <Name>.rbxm mit den Ordnern Code und Objekte (in Studio per Rechtsklick > Insert from File einfügbar), code.lua zum Lesen und jede Animation, jeder Sound und jedes Bild als eigene Datei.\n\nJede Animation steckt zusätzlich als KeyframeSequence in ihrem Animation-Objekt. Damit läuft die Cutscene mit Abspielen in jeder Place, auch wenn Roblox die Original-ID dort sperrt.\n\nKlick auf eine Zeile in der Liste zeigt das Objekt im Explorer.",
+	"Herunterladen", ACCENT, "Mein Account", PURPLE))
+-- Eine Tabelle statt mehrerer locals: Luau erlaubt höchstens 200 lokale Variablen pro Funktion.
+local csPlay = {}
+csPlay.row, csPlay.play, csPlay.auto = buttonRow("Abspielen: Cutscene im Explorer anklicken (das Cutscene-Script aus dem Spiel oder den eingefügten Download-Ordner) und drücken. Die Kamera fliegt wie im Spiel mit, jedes Rig spielt seine Animation, danach ist alles wieder wie vorher. Klappt im Edit-Modus und im Play-Test. Nochmal drücken stoppt.\n\nWer spielt was: Die Kamera-Animation (Camera) läuft auf dem Kamera-Rig (Cam, CameraRig …), jede andere Animation auf dem Rig mit passendem Namen. Spieler-Animationen (Player, CloneAnim …) laufen auf einem Dummy, im Play-Test auf deiner Figur. Hängt die Kamera am Spieler (z. B. Barrage-Finisher), steht sie an deiner Figur bzw. am Dummy.\n\nBeim Play-Test: merkt sich die angeklickte Cutscene. Jeder Play-Test (F5) spielt sie dann einmal ab, sobald deine Figur da ist. Nochmal drücken schaltet es aus.\n\nNicht nachgebaut: Effekte, die der Code zu bestimmten Zeitpunkten auslöst (Partikel-Bursts, Sounds, Bildschirm-Effekte).",
+	"Abspielen", BLUE, "Beim Play-Test: aus", GREY)
+csPlay.label = label("")
 
 -- Tab: Credits -----------------------------------------------------------------------------
 
@@ -658,13 +670,30 @@ view.InputEnded:Connect(function(input)
 end)
 view.MouseLeave:Connect(function() cam.drag = nil end)
 
+-- R6-Rigs haben oft den Kopf als PrimaryPart. Wer dann PrimaryPart verankert, friert den Kopf ein und der
+-- Körper dreht sich um ihn herum. Deshalb: HumanoidRootPart als PrimaryPart, nur er verankert, Rest lose.
+-- root: Wurzel des Rigs (Standard: HumanoidRootPart). Wird PrimaryPart. Teile, die ein Motor6D bewegt, werden
+-- gelöst, sonst bleiben sie stehen. Lose Teile (z. B. VFX) bleiben, wie sie sind.
+local function fixRigRoot(rig, root)
+	root = root or rig:FindFirstChild("HumanoidRootPart") or rig.PrimaryPart
+	if root then rig.PrimaryPart = root end
+	for _, j in rig:GetDescendants() do
+		if j:IsA("Motor6D") then
+			for _, part in { j.Part0, j.Part1 } do
+				if part and part ~= root and part:IsDescendantOf(rig) then part.Anchored = false end
+			end
+		end
+	end
+	return rig
+end
+
 -- Rig für die Animation: ausgewähltes Model mit Humanoid, sonst ein Standard-Dummy.
 local function makeRig(clip)
 	for _, sel in Selection:Get() do
 		local m = sel:IsA("Model") and sel or sel:FindFirstAncestorWhichIsA("Model")
 		if m and m:FindFirstChildWhichIsA("Humanoid", true) then
 			local ok, copy = pcall(function() return m:Clone() end)
-			if ok and copy then return copy end
+			if ok and copy then return fixRigRoot(copy) end
 		end
 	end
 	local r6 = not clip or clip:FindFirstChild("Torso", true) ~= nil
@@ -678,7 +707,7 @@ local function makeRig(clip)
 		return Players:CreateHumanoidModelFromDescription(desc,
 			r6 and Enum.HumanoidRigType.R6 or Enum.HumanoidRigType.R15)
 	end)
-	return ok and rig or nil
+	return ok and fixRigRoot(rig) or nil
 end
 
 local function previewAnimation(clip)
@@ -730,7 +759,10 @@ local function showPreview()
 	local clip = loaded.clip
 	if clip then
 		previewAnimation(clip)
-		if track then playToggle() end
+		if track then -- Vorschau läuft sofort; der Knopf Abspielen stellt einen Dummy in die Welt
+			track:Play(0)
+			stepConn = RunService.Heartbeat:Connect(function(dt) animator:StepAnimations(dt) end)
+		end
 		return
 	end
 	for _, obj in loaded.objects do
@@ -1008,17 +1040,33 @@ local function addToCart(id, name, kind)
 	refreshCart()
 end
 
+-- Knopftext mit Fortschritt, z. B. "Speichere 40% (4/10) …".
+local function progress(verb, done, total)
+	return ("%s %d%% (%d/%d) …"):format(verb, math.floor(done / total * 100), done, total)
+end
+
 -- Lädt die IDs neu von Roblox und speichert sie über den Server in downloads/ (oder downloads/<folder>).
+-- In Paketen, damit der Knopf zeigt, wie weit es ist.
+local SAVE_BATCH = 5
 local function save(ids, folder, btn, idleText)
-	btn.Active, btn.Text = false, "Speichere …"
+	btn.Active = false
 	local url = ("%s/api/plugin-save?place=%s&folder=%s"):format(SERVER, HttpService:UrlEncode(placeBox.Text), HttpService:UrlEncode(folder))
-	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="POST", Body = table.concat(ids, "\n") })
-	btn.Active, btn.Text = true, idleText
-	if not ok or not res.Success then
-		status.TextColor3, status.Text = BAD, "Speichern fehlgeschlagen. Läuft start.bat?"
-		return nil
+	local r = { saved = 0, total = #ids, folder = folder, errors = {} }
+	for first = 1, #ids, SAVE_BATCH do
+		btn.Text = progress("Speichere", first - 1, #ids)
+		local batch = table.move(ids, first, math.min(first + SAVE_BATCH - 1, #ids), 1, {})
+		local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="POST", Body = table.concat(batch, "\n") })
+		if not ok or not res.Success then
+			btn.Active, btn.Text = true, idleText
+			status.TextColor3, status.Text = BAD, "Speichern fehlgeschlagen. Läuft start.bat?"
+			return nil
+		end
+		local part = HttpService:JSONDecode(res.Body)
+		r.saved += part.saved
+		r.folder = part.folder
+		table.move(part.errors, 1, #part.errors, #r.errors + 1, r.errors)
 	end
-	local r = HttpService:JSONDecode(res.Body)
+	btn.Active, btn.Text = true, idleText
 	local lines = { ("%d/%d gespeichert in %s"):format(r.saved, r.total, r.folder) }
 	for _, e in r.errors do
 		table.insert(lines, ("%s: %s"):format(e.id, e.error))
@@ -1072,7 +1120,7 @@ local function repairTextures(found, ids, btn)
 	local map = plugin:GetSetting("repaired") or {}
 	local errors, done = {}, 0
 	for i, id in ids do
-		btn.Text = ("Lade hoch %d/%d …"):format(i, #ids)
+		btn.Text = progress("Lade hoch", i - 1, #ids)
 		if not map[id] then
 			local newId, err = reupload(id)
 			if newId then map[id] = newId else table.insert(errors, id .. ": " .. err) end
@@ -1101,11 +1149,20 @@ end
 local HEX = {}
 for i = 0, 255 do HEX[string.char(i)] = string.format("%02x", i) end
 
-local function store(folder, file, bytes)
-	local hex = bytes:gsub(".", HEX) -- Tabelle statt Funktion: bei ganzen Places (viele MB) deutlich schneller
+-- In Stücken von 1 MB: Der Knopf (btn, optional) zeigt Prozent, und Studio friert bei großen Dateien nicht ein.
+local STORE_CHUNK = 1024 * 1024
+local function store(folder, file, bytes, btn)
 	local url = ("%s/api/plugin-store?folder=%s&file=%s"):format(SERVER, HttpService:UrlEncode(folder), HttpService:UrlEncode(file))
-	local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method ="POST", Body = hex })
-	return ok and res.Success
+	local parts = math.max(1, math.ceil(#bytes / STORE_CHUNK))
+	for i = 1, parts do
+		if btn then btn.Text = progress("Sende Datei", i - 1, parts) end
+		-- Tabelle statt Funktion in gsub: bei vielen MB deutlich schneller
+		local hex = bytes:sub((i - 1) * STORE_CHUNK + 1, i * STORE_CHUNK):gsub(".", HEX)
+		local ok, res = pcall(HttpService.RequestAsync, HttpService,
+			{ Url = url .. (i > 1 and "&append=1" or ""), Headers = PLUGIN_HEADERS, Method = "POST", Body = hex })
+		if not (ok and res.Success) then return false end
+	end
+	return true
 end
 
 local function backup(roots, name, repair, btn, idleText, outLabel)
@@ -1117,7 +1174,7 @@ local function backup(roots, name, repair, btn, idleText, outLabel)
 
 	btn.Text = "Speichere …"
 	local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, roots)
-	local stored = okSer and store(name, "", buffer.tostring(buf))
+	local stored = okSer and store(name, "", buffer.tostring(buf), btn)
 	table.insert(lines, stored and ("Gespeichert: downloads/%s/%s.rbxm"):format(name, name) or "Datei konnte nicht gespeichert werden. Läuft start.bat?")
 	if #ids > 0 then
 		local fileIds = {}
@@ -1454,6 +1511,20 @@ fxFilter:GetPropertyChangedSignal("Text"):Connect(renderFx)
 
 pickBtn.Activated:Connect(function()
 	local ids = idsInSelection()
+	local first = Selection:Get()[1]
+	local clip = first and (first:IsA("AnimationClip") and first or #ids == 0 and first:FindFirstChildWhichIsA("AnimationClip", true))
+	if clip then
+		-- Animationsdatei (z. B. per Insert from File eingefügt): hat keine ID, also direkt als Clip zeigen.
+		if loaded and loaded.sound then loaded.sound:Destroy() end
+		local copy = clip:Clone()
+		loaded = { id = "", kind = "Animation", name = clip.Name, objects = { copy }, clip = copy }
+		status.TextColor3, status.Text = OK, ("Animation: %s. Abspielen stellt einen Dummy vor deine Kamera."):format(clip.Name)
+		savedLabel.Text, row2.Visible, uploadBtn.Visible = "", false, false
+		insertBtn.Visible, playBtn.Visible, row.Visible = true, true, true
+		showTab("Laden")
+		showPreview()
+		return
+	end
 	if #ids == 0 then
 		status.TextColor3, status.Text = BAD, "In der Auswahl steckt keine Asset-ID. Klick z. B. eine Animation oder einen ParticleEmitter an."
 	elseif #ids == 1 then
@@ -1498,7 +1569,7 @@ sendBtn.Activated:Connect(function()
 	local parents = {}
 	for _, obj in sel do table.insert(parents, obj.Parent and obj.Parent:GetFullName() or "") end
 	sendBtn.Active, sendBtn.Text = false, "Sende …"
-	local sent = store(TRANSFER, "auswahl.rbxm", buffer.tostring(buf)) and store(TRANSFER, "ziel.json", HttpService:JSONEncode(parents))
+	local sent = store(TRANSFER, "auswahl.rbxm", buffer.tostring(buf), sendBtn) and store(TRANSFER, "ziel.json", HttpService:JSONEncode(parents))
 	sendBtn.Active, sendBtn.Text = true, "Auswahl senden"
 	if sent then
 		transferLabel.TextColor3, transferLabel.Text = OK, ("%d Objekt(e) gesendet. In der anderen Place: Hier empfangen."):format(#sel)
@@ -1713,7 +1784,7 @@ local function uploadImages(items, btn, idleText)
 	local lines, okCount = {}, 0
 	btn.Active = false
 	for i, item in items do
-		btn.Text = ("Lade hoch %d/%d …"):format(i, #items)
+		btn.Text = progress("Lade hoch", i - 1, #items)
 		local newId, err = map[item.id], nil
 		if not newId then newId, err = reupload(item.id) end
 		if newId then
@@ -1789,7 +1860,8 @@ cartBtn.Activated:Connect(function()
 end)
 insertBtn.Activated:Connect(insert)
 playBtn.Activated:Connect(function()
-	if loaded and loaded.vfx and not loaded.clip then emitVfx() else playToggle() end
+	if not loaded or loaded.clip then return end -- Animationen: Dummy in der Welt, siehe unter startScene
+	if loaded.vfx then emitVfx() else playToggle() end
 end)
 widget:GetPropertyChangedSignal("Enabled"):Connect(function() if not widget.Enabled then stopPreview() end end)
 plugin.Unloading:Connect(stopPreview)
@@ -1807,8 +1879,10 @@ local function stopScene()
 	end
 	scene.rig:Destroy()
 	scene = nil
+	if loaded and loaded.clip then playBtn.Text = "Abspielen" end
 	sceneLabel.TextColor3, sceneLabel.Text = MUTED, "Gestoppt, aufgeräumt."
 end
+plugin.Unloading:Connect(stopScene) -- beim Neuladen des Plugins keinen Dummy im Workspace zurücklassen
 
 -- Objekte, die ein Effekt-Modul benutzt, aus seinem Code lesen statt den Code auszuführen.
 -- Erkennt Pfade wie u5.Whitesnake.DirectOrderThrow, ["Client Assets"]["The World"].X, :WaitForChild("X")
@@ -2040,10 +2114,10 @@ end
 local lastEntry = nil
 
 -- entry: Treffer aus der Suche. Ohne: im Explorer ausgewähltes ModuleScript, sonst nur die Animation.
-local function startScene(entry)
+local function startScene(entry, animOnly)
 	stopScene()
 	local clip = loaded and loaded.clip
-	if not entry then
+	if not entry and not animOnly then
 		for _, sel in Selection:Get() do
 			if sel:IsA("ModuleScript") then
 				entry = { name = sel.Name, script = sel, line = 1, text = sel.Source, source = sel.Source }
@@ -2061,7 +2135,7 @@ local function startScene(entry)
 		sceneLabel.TextColor3, sceneLabel.Text = BAD, "Dummy ließ sich nicht bauen."
 		return
 	end
-	rig.Name = "Vorschau-Dummy"
+	rig.Name, rig.Archivable = "Vorschau-Dummy", false -- nie mit der Place speichern
 	local cf = workspace.CurrentCamera.CFrame
 	local pos = cf.Position + cf.LookVector * 12
 	rig:PivotTo(CFrame.lookAt(pos, Vector3.new(cf.Position.X, pos.Y, cf.Position.Z)))
@@ -2109,6 +2183,22 @@ local function startScene(entry)
 	end
 	sceneLabel.TextColor3, sceneLabel.Text = OK, text
 end
+
+-- Abspielen im Tab Laden: Animation auf einem Dummy 12 Studs vor der Kamera. Ist ein Rig ausgewählt,
+-- spielt eine Kopie davon. Nochmal drücken entfernt ihn.
+playBtn.Activated:Connect(function()
+	if not (loaded and loaded.clip) then return end
+	if scene and scene.clip == loaded.clip then
+		stopScene()
+		return
+	end
+	startScene(nil, true)
+	if scene then
+		scene.clip = loaded.clip
+		playBtn.Text = "Stopp"
+		status.TextColor3, status.Text = OK, ("%s spielt auf einem Dummy vor deiner Kamera. Stopp entfernt ihn."):format(loaded.name)
+	end
+end)
 
 -- Einmal pro Fokus einlesen statt bei jedem Tastendruck, große Places haben tausende Scripts.
 local fxEntries, fxIndex = {}, {}
@@ -2168,204 +2258,263 @@ plugin.Unloading:Connect(stopScene)
 -- Was ein Cutscene-Script braucht, steht in seinem Code: Pfade zu Objekten, require(...) auf Module und
 -- Asset-IDs. Gesucht wird wie bei den Effekten, aber jede Objektart zählt und Module werden mit durchsucht.
 do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze von 200
-	local CUTSCENE_MAX_DESCENDANTS = 10000 -- obere Grenze, auch wenn der Code ein Objekt ganz braucht
-	local CUTSCENE_MAX_DEPTH = 4 -- require-Ketten so tief verfolgen
-	local CUTSCENE_STORE_SIZE = 300 -- größere Objekte nur, wenn der Code sie ganz braucht (sonst Lager wie Anims, Sounds)
-	local CUTSCENE_LIBRARY_USERS = 3 -- ab so vielen anderen Scripts, die ein Modul laden, ist es eine Bibliothek
-	-- Code braucht ein Objekt ganz, wenn er es klont, durchläuft, umhängt oder mit einem Variablennamen darin sucht.
-	-- Feste Namen in FindFirstChild("x") und ["x"] hat normalize() schon zu .x gemacht, was übrig bleibt, ist dynamisch.
-	local WHOLE_USES = { ":GetChildren", ":GetDescendants", ":Clone", ":FindFirstChild", ":WaitForChild", "%[", "%.Parent%s*=[^=]" }
+	local csCurrent = nil -- { scripts, objects, ids }
+	do -- Suche nach Abhängigkeiten: eigener Block, danach braucht nur noch csCurrent die Ergebnisse
+		local CUTSCENE_MAX_DESCENDANTS = 10000 -- obere Grenze, auch wenn der Code ein Objekt ganz braucht
+		local CUTSCENE_MAX_DEPTH = 4 -- require-Ketten so tief verfolgen
+		local CUTSCENE_STORE_SIZE = 300 -- größere Objekte nur, wenn der Code sie ganz braucht (sonst Lager wie Anims, Sounds)
+		local CUTSCENE_LIBRARY_USERS = 3 -- ab so vielen anderen Scripts, die ein Modul laden, ist es eine Bibliothek
+		-- Code braucht ein Objekt ganz, wenn er es klont, durchläuft, umhängt oder mit einem Variablennamen darin sucht.
+		-- Feste Namen in FindFirstChild("x") und ["x"] hat normalize() schon zu .x gemacht, was übrig bleibt, ist dynamisch.
+		local WHOLE_USES = { ":GetChildren", ":GetDescendants", ":Clone", ":FindFirstChild", ":WaitForChild", "%[", "%.Parent%s*=[^=]" }
 
-	local function usedWhole(obj, text, alias)
-		local token = obj.Name:gsub(" ", "\1")
-		local names = { token }
-		for name, target in alias do
-			if target == token then table.insert(names, name) end
-		end
-		for _, n in names do
-			local p = "%f[%w_\1]" .. (n:gsub("[^%w_\1]", "%%%0")) .. "%f[^%w_\1]"
-			for _, use in WHOLE_USES do
-				if text:find(p .. use) then return true end
+		local function usedWhole(obj, text, alias)
+			local token = obj.Name:gsub(" ", "\1")
+			local names = { token }
+			for name, target in alias do
+				if target == token then table.insert(names, name) end
 			end
-		end
-		return false
-	end
-
-	local function indexAll()
-		local byName, sources = {}, {}
-		for _, obj in game:GetDescendants() do
-			local ok, name = pcall(function() return obj.Name end)
-			if ok then
-				byName[name] = byName[name] or {}
-				table.insert(byName[name], obj)
-			end
-			local okSrc, src = pcall(function() return obj:IsA("LuaSourceContainer") and obj.Source end)
-			if okSrc and src then sources[obj] = src end
-		end
-		return byName, sources
-	end
-
-	-- FindFirstChild(Name) mit Name = script.Name wird zum echten Namen, sonst käme der ganze Ordner aller Varianten mit.
-	local function withScriptName(src, name)
-		local vars = { "script%.Name" }
-		for v in src:gmatch("local ([%w_]+) = script%.Name%s") do table.insert(vars, v) end
-		local function literal() return ('["%s"]'):format(name) end
-		for _, v in vars do
-			src = src:gsub(":FindFirstChild%(" .. v .. "%)", literal):gsub(":WaitForChild%(" .. v .. "%)", literal)
-				:gsub("%[" .. v .. "%]", literal)
-		end
-		return src
-	end
-
-	local function cutsceneScripts()
-		local scripts, seen = {}, {}
-		for _, sel in Selection:Get() do
-			local list = sel:GetDescendants()
-			table.insert(list, 1, sel)
-			for _, obj in list do
-				if obj:IsA("LuaSourceContainer") and not seen[obj] then
-					seen[obj] = true
-					table.insert(scripts, obj)
-				end
-			end
-		end
-		return scripts
-	end
-
-	-- Gibt Scripts (Auswahl plus benutzte Module), Objekte und Asset-IDs zurück.
-	-- Bibliotheken (FunctionLibrary & Co.) kommen nur als Code mit: ihre Objekte gehören zum ganzen Spiel.
-	local function cutsceneDeps(selected)
-		local byName, sources = indexAll()
-		local selectedSet = {}
-		for _, s in selected do selectedSet[s] = true end
-		-- shortcut: zählt Scripts, in denen Modulname und "require" vorkommen, nicht echte require-Aufrufe
-		local function isLibrary(module)
-			local users = 0
-			for s, src in sources do
-				if s ~= module and not selectedSet[s] and src:find(module.Name, 1, true) and src:find("require", 1, true) then
-					users += 1
-					if users >= CUTSCENE_LIBRARY_USERS then return true end
+			for _, n in names do
+				local p = "%f[%w_\1]" .. (n:gsub("[^%w_\1]", "%%%0")) .. "%f[^%w_\1]"
+				for _, use in WHOLE_USES do
+					if text:find(p .. use) then return true end
 				end
 			end
 			return false
 		end
-		local scripts, objects, ids = {}, {}, {}
-		local seenScript, seenObj, seenId, libSet = {}, {}, {}, {}
-		local function addId(id)
-			if #id >= 5 and not seenId[id] then
-				seenId[id] = true
-				table.insert(ids, id)
+
+		local function indexAll()
+			local byName, sources = {}, {}
+			for _, obj in game:GetDescendants() do
+				local ok, name = pcall(function() return obj.Name end)
+				if ok then
+					byName[name] = byName[name] or {}
+					table.insert(byName[name], obj)
+				end
+				local okSrc, src = pcall(function() return obj:IsA("LuaSourceContainer") and obj.Source end)
+				if okSrc and src then sources[obj] = src end
 			end
+			return byName, sources
 		end
-		local queue = {}
-		for _, s in selected do table.insert(queue, { s, 0, false }) end
-		while #queue > 0 do
-			local s, depth, lib = table.unpack(table.remove(queue, 1))
-			if not seenScript[s] then
-				seenScript[s] = true
-				table.insert(scripts, s)
-				libSet[s] = lib or nil
-				local src = withScriptName(sources[s] or "", s.Name)
-				if not lib then
-					for id in src:gmatch("rbxassetid://(%d+)") do addId(id) end
-					for id in src:gmatch("[?&][iI][dD]=(%d+)") do addId(id) end
-					for id in src:gmatch("[Ii]d%s*=%s*(%d+)") do addId(id) end -- AnimationId = 123, SoundId = 123
-				end
-				local text, alias = normalize(src), {}
-				for name, rhs in text:gmatch("local ([%w_]+) = ([^\n]+)") do
-					alias[name] = rhs:match("([%w_\1]+)%s*%)*%s*$")
-				end
-				local function accept(obj)
-					if obj:IsA("LuaSourceContainer") then return obj:IsA("ModuleScript") end
-					if lib then return false end -- Bibliotheken: nur ihre Module zählen
-					return #obj:GetDescendants() <= CUTSCENE_STORE_SIZE or usedWhole(obj, text, alias)
-				end
-				local entry = { name = s.Name, script = s, line = 1, text = src, source = src }
-				for _, obj in effectObjects(entry, byName, accept, CUTSCENE_MAX_DESCENDANTS) do
-					if obj:IsA("ModuleScript") then
-						if depth < CUTSCENE_MAX_DEPTH and not seenScript[obj] then
-							table.insert(queue, { obj, depth + 1, lib or isLibrary(obj) })
-						end
-					elseif not lib and not seenObj[obj] then
-						seenObj[obj] = true
-						table.insert(objects, obj)
+
+		-- FindFirstChild(Name) mit Name = script.Name wird zum echten Namen, sonst käme der ganze Ordner aller Varianten mit.
+		local function withScriptName(src, name)
+			local vars = { "script%.Name" }
+			for v in src:gmatch("local ([%w_]+) = script%.Name%s") do table.insert(vars, v) end
+			local function literal() return ('["%s"]'):format(name) end
+			for _, v in vars do
+				src = src:gsub(":FindFirstChild%(" .. v .. "%)", literal):gsub(":WaitForChild%(" .. v .. "%)", literal)
+					:gsub("%[" .. v .. "%]", literal)
+			end
+			return src
+		end
+
+		local function cutsceneScripts()
+			local scripts, seen = {}, {}
+			for _, sel in Selection:Get() do
+				local list = sel:GetDescendants()
+				table.insert(list, 1, sel)
+				for _, obj in list do
+					if obj:IsA("LuaSourceContainer") and not seen[obj] then
+						seen[obj] = true
+						table.insert(scripts, obj)
 					end
 				end
 			end
+			return scripts
 		end
-		-- Objekte, die in einem anderen gefundenen Objekt stecken, nur einmal.
-		local top = {}
-		for _, obj in objects do
-			local inside = false
-			for _, other in objects do
-				if other ~= obj and obj:IsDescendantOf(other) then inside = true break end
+
+		-- Gibt Scripts (Auswahl plus benutzte Module), Objekte und Asset-IDs zurück.
+		-- Bibliotheken (FunctionLibrary & Co.) kommen nur als Code mit: ihre Objekte gehören zum ganzen Spiel.
+		local function cutsceneDeps(selected)
+			local byName, sources = indexAll()
+			local selectedSet = {}
+			for _, s in selected do selectedSet[s] = true end
+			-- shortcut: zählt Scripts, in denen Modulname und "require" vorkommen, nicht echte require-Aufrufe
+			local function isLibrary(module)
+				local users = 0
+				for s, src in sources do
+					if s ~= module and not selectedSet[s] and src:find(module.Name, 1, true) and src:find("require", 1, true) then
+						users += 1
+						if users >= CUTSCENE_LIBRARY_USERS then return true end
+					end
+				end
+				return false
 			end
-			if not inside then table.insert(top, obj) end
+			local scripts, objects, ids = {}, {}, {}
+			local seenScript, seenObj, seenId, libSet = {}, {}, {}, {}
+			local function addId(id)
+				if #id >= 5 and not seenId[id] then
+					seenId[id] = true
+					table.insert(ids, id)
+				end
+			end
+			local queue = {}
+			for _, s in selected do table.insert(queue, { s, 0, false }) end
+			while #queue > 0 do
+				local s, depth, lib = table.unpack(table.remove(queue, 1))
+				if not seenScript[s] then
+					seenScript[s] = true
+					table.insert(scripts, s)
+					libSet[s] = lib or nil
+					local src = withScriptName(sources[s] or "", s.Name)
+					if not lib then
+						for id in src:gmatch("rbxassetid://(%d+)") do addId(id) end
+						for id in src:gmatch("[?&][iI][dD]=(%d+)") do addId(id) end
+						for id in src:gmatch("[Ii]d%s*=%s*(%d+)") do addId(id) end -- AnimationId = 123, SoundId = 123
+					end
+					local text, alias = normalize(src), {}
+					for name, rhs in text:gmatch("local ([%w_]+) = ([^\n]+)") do
+						alias[name] = rhs:match("([%w_\1]+)%s*%)*%s*$")
+					end
+					local function accept(obj)
+						if obj:IsA("LuaSourceContainer") then return obj:IsA("ModuleScript") end
+						if lib then return false end -- Bibliotheken: nur ihre Module zählen
+						return #obj:GetDescendants() <= CUTSCENE_STORE_SIZE or usedWhole(obj, text, alias)
+					end
+					local entry = { name = s.Name, script = s, line = 1, text = src, source = src }
+					for _, obj in effectObjects(entry, byName, accept, CUTSCENE_MAX_DESCENDANTS) do
+						if obj:IsA("ModuleScript") then
+							if depth < CUTSCENE_MAX_DEPTH and not seenScript[obj] then
+								table.insert(queue, { obj, depth + 1, lib or isLibrary(obj) })
+							end
+						elseif not lib and not seenObj[obj] then
+							seenObj[obj] = true
+							table.insert(objects, obj)
+						end
+					end
+				end
+			end
+			-- Objekte, die in einem anderen gefundenen Objekt stecken, nur einmal.
+			local top = {}
+			for _, obj in objects do
+				local inside = false
+				for _, other in objects do
+					if other ~= obj and obj:IsDescendantOf(other) then inside = true break end
+				end
+				if not inside then table.insert(top, obj) end
+			end
+			for _, id in idsIn(top) do addId(id) end
+			return scripts, top, ids, libSet
 		end
-		for _, id in idsIn(top) do addId(id) end
-		return scripts, top, ids, libSet
+
+
+		local function refreshCutscene()
+			for _, old in csList:GetChildren() do
+				if old:IsA("GuiObject") then old:Destroy() end
+			end
+			local selected = cutsceneScripts()
+			if #selected == 0 then
+				csCurrent = nil
+				csInfo.TextColor3, csInfo.Text = MUTED, "Kein Script ausgewählt. Cutscene-Script oder seinen Ordner im Explorer anklicken."
+				return
+			end
+			local scripts, objects, ids, libSet = cutsceneDeps(selected)
+			csCurrent = { scripts = scripts, objects = objects, ids = ids }
+			csInfo.TextColor3 = TEXT
+			csInfo.Text = ("%d Scripts (davon %d Module über require), %d Objekte, %d Asset-IDs.")
+				:format(#scripts, #scripts - #selected, #objects, #ids)
+			local order = 0
+			local function row(text, obj)
+				order += 1
+				if order > 60 then return end -- shortcut: Liste kappt bei 60 Zeilen, heruntergeladen wird trotzdem alles
+				local b = listButton(text, csList)
+				b.LayoutOrder = order
+				if obj then b.Activated:Connect(function() Selection:Set({ obj }) end) end
+			end
+			for _, s in scripts do
+				row(("%s  ·  %s%s"):format(s.Name, s.ClassName, libSet[s] and ", Bibliothek: nur Code" or ""), s)
+			end
+			for _, obj in objects do
+				local rig = obj:FindFirstChildWhichIsA("AnimationController", true) or obj:FindFirstChildWhichIsA("Humanoid", true)
+				row(("%s  ·  %s%s"):format(obj:GetFullName(), obj.ClassName, rig and ", Rig" or ""), obj)
+			end
+			if #ids > 0 then row(("%d Asset-IDs: %s"):format(#ids, table.concat(ids, ", "):sub(1, 120))) end
+		end
+
+		Selection.SelectionChanged:Connect(function()
+			if pages.Cutscene.Visible then refreshCutscene() end
+		end)
+		tabs.Cutscene.Activated:Connect(refreshCutscene)
 	end
 
-	local csCurrent = nil -- { scripts, objects, ids }
-
-	local function refreshCutscene()
-		for _, old in csList:GetChildren() do
-			if old:IsA("GuiObject") then old:Destroy() end
+	-- Animation als KeyframeSequence über den lokalen Server holen (der probiert die Spielkontexte durch).
+	-- Gleiche IDs nur einmal. Gibt den Clip oder nil.
+	-- Im Play-Test darf nur der Server HTTP. Der Client fragt deshalb das Plugin auf dem Server über diese RemoteFunction.
+	local CLIP_REMOTE = "AssetDownloaderClip"
+	local clipCache = {}
+	local function fetchClip(id)
+		if clipCache[id] ~= nil then return clipCache[id] or nil end
+		local clip = false
+		if RunService:IsRunning() and RunService:IsClient() then
+			local remote = game:GetService("ReplicatedStorage"):FindFirstChild(CLIP_REMOTE)
+			local ok, res = pcall(function() return remote and remote:InvokeServer(id) end)
+			clip = ok and typeof(res) == "Instance" and res:IsA("AnimationClip") and res or false
+			clipCache[id] = clip
+			return clip or nil
 		end
-		local selected = cutsceneScripts()
-		if #selected == 0 then
-			csCurrent = nil
-			csInfo.TextColor3, csInfo.Text = MUTED, "Kein Script ausgewählt. Cutscene-Script oder seinen Ordner im Explorer anklicken."
-			return
+		local url = ("%s/api/plugin?q=%s&place=%s"):format(SERVER, id, HttpService:UrlEncode(placeBox.Text))
+		local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method = "GET" })
+		if ok and res.Success then
+			local okDes, objs = pcall(SerializationService.DeserializeInstancesAsync, SerializationService, buffer.fromstring(res.Body))
+			for _, obj in okDes and objs or {} do
+				clip = obj:IsA("AnimationClip") and obj or obj:FindFirstChildWhichIsA("AnimationClip", true) or false
+				if clip then break end
+			end
 		end
-		local scripts, objects, ids, libSet = cutsceneDeps(selected)
-		csCurrent = { scripts = scripts, objects = objects, ids = ids }
-		csInfo.TextColor3 = TEXT
-		csInfo.Text = ("%d Scripts (davon %d Module über require), %d Objekte, %d Asset-IDs.")
-			:format(#scripts, #scripts - #selected, #objects, #ids)
-		local order = 0
-		local function row(text, obj)
-			order += 1
-			if order > 60 then return end -- shortcut: Liste kappt bei 60 Zeilen, heruntergeladen wird trotzdem alles
-			local b = listButton(text, csList)
-			b.LayoutOrder = order
-			if obj then b.Activated:Connect(function() Selection:Set({ obj }) end) end
-		end
-		for _, s in scripts do
-			row(("%s  ·  %s%s"):format(s.Name, s.ClassName, libSet[s] and ", Bibliothek: nur Code" or ""), s)
-		end
-		for _, obj in objects do
-			local rig = obj:FindFirstChildWhichIsA("AnimationController", true) or obj:FindFirstChildWhichIsA("Humanoid", true)
-			row(("%s  ·  %s%s"):format(obj:GetFullName(), obj.ClassName, rig and ", Rig" or ""), obj)
-		end
-		if #ids > 0 then row(("%d Asset-IDs: %s"):format(#ids, table.concat(ids, ", "):sub(1, 120))) end
+		clipCache[id] = clip
+		return clip or nil
 	end
 
-	Selection.SelectionChanged:Connect(function()
-		if pages.Cutscene.Visible then refreshCutscene() end
-	end)
-	tabs.Cutscene.Activated:Connect(refreshCutscene)
+	local function animId(a)
+		return a.AnimationId:match("(%d%d%d%d%d+)")
+	end
+
+	if RunService:IsRunning() and RunService:IsServer() then
+		-- Clips für den Client: einmal laden, in ReplicatedStorage legen, damit sie beim Client ankommen.
+		local rs = game:GetService("ReplicatedStorage")
+		local holder = Instance.new("Folder")
+		holder.Name, holder.Parent = CLIP_REMOTE .. "s", rs
+		local remote = Instance.new("RemoteFunction")
+		remote.Name, remote.Parent = CLIP_REMOTE, rs
+		remote.OnServerInvoke = function(_, id)
+			if type(id) ~= "string" or not id:match("^%d+$") then return nil end
+			local clip = holder:FindFirstChild(id)
+			if not clip then
+				local fetched = fetchClip(id)
+				if not fetched then return nil end
+				clip = fetched:Clone()
+				clip.Name, clip.Parent = id, holder
+			end
+			return clip
+		end
+	end
 
 	local function downloadCutscene(repair, btn, idleText)
 		if not csCurrent then
 			status.TextColor3, status.Text = BAD, "Erst ein Cutscene-Script im Explorer anklicken."
 			return
 		end
+		if not btn.Active then return end
 		local name = csCurrent.scripts[1].Name -- der Server entfernt Zeichen, die in Ordnernamen nicht gehen
-		btn.Active, btn.Text = false, "Lade herunter …"
+		btn.Active = false
 		local pack = Instance.new("Folder")
 		pack.Name = name
-		local code = {}
-		for folderName, list in { Code = csCurrent.scripts, Objekte = csCurrent.objects } do
-			local f = Instance.new("Folder")
-			f.Name, f.Parent = folderName, pack
-			for _, obj in list do
-				local ok, copy = pcall(function() return obj:Clone() end)
-				if ok and copy then copy.Parent = f end -- nicht archivierbare Objekte liefern nil
+		local folders = { Code = Instance.new("Folder"), Objekte = Instance.new("Folder") }
+		for folderName, f in folders do f.Name, f.Parent = folderName, pack end
+		local jobs = {}
+		for _, s in csCurrent.scripts do table.insert(jobs, { s, folders.Code }) end
+		for _, obj in csCurrent.objects do table.insert(jobs, { obj, folders.Objekte }) end
+		for i, job in jobs do
+			if i % 10 == 1 then
+				btn.Text = progress("Kopiere", i - 1, #jobs)
+				task.wait() -- Studio zeichnet den Knopf erst nach einem Yield neu
 			end
+			local ok, copy = pcall(function() return job[1]:Clone() end)
+			if ok and copy then copy.Parent = job[2] end -- nicht archivierbare Objekte liefern nil
 		end
 		-- Unter eigenem Namen: Bilder in der Kopie neu hochladen und alte IDs überall ersetzen, auch im Code.
-		local lines, map, allOk = {}, {}, true
+		local lines, map, allOk, code = {}, {}, true, {}
 		if repair then
 			local found, texIds = collectTextures({ pack }), {}
 			-- Nur IDs aus Textur-Eigenschaften: Bei IDs, die nur im Code stehen, weiß niemand, ob es Bilder sind.
@@ -2382,16 +2531,34 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 				end
 			end
 		end
+		-- Jede Animation als KeyframeSequence in ihr Animation-Objekt: Dann spielt Abspielen die Cutscene
+		-- in jeder Place, auch wo Roblox die Original-ID nicht herausgibt.
+		local anims, embedded = {}, 0
+		for _, a in pack:GetDescendants() do
+			if a:IsA("Animation") and animId(a) and not a:FindFirstChildWhichIsA("AnimationClip") then table.insert(anims, a) end
+		end
+		for i, a in anims do
+			btn.Text = progress("Lade Animationen", i - 1, #anims)
+			local clip = fetchClip(animId(a))
+			if clip then
+				clip:Clone().Parent = a
+				embedded += 1
+			end
+		end
+		if #anims > 0 then
+			table.insert(lines, ("%d/%d Animationen eingebettet, Abspielen geht damit in jeder Place."):format(embedded, #anims))
+		end
 		for _, s in pack:GetDescendants() do
 			if s:IsA("LuaSourceContainer") then
 				local ok, src = pcall(function() return s.Source end)
 				if ok then table.insert(code, ("-- ===== %s (%s) =====\n%s"):format(s:GetFullName(), s.ClassName, src)) end
 			end
 		end
-		btn.Text = "Speichere …"
+		btn.Text = "Speichere Datei …"
+		task.wait()
 		local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, { pack })
 		pack:Destroy()
-		local stored = okSer and store(name, "", buffer.tostring(buf))
+		local stored = okSer and store(name, "", buffer.tostring(buf), btn)
 		table.insert(lines, stored and ("Gespeichert: downloads/%s/%s.rbxm"):format(name, name)
 			or "Cutscene konnte nicht gespeichert werden. Läuft start.bat?")
 		if #code > 0 and store(name, "code.lua", table.concat(code, "\n\n")) then table.insert(lines, "Code zum Lesen: code.lua") end
@@ -2400,15 +2567,689 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			local fileIds = {}
 			for _, id in csCurrent.ids do table.insert(fileIds, map[id] or id) end
 			local r = save(fileIds, name, btn, "Speichere …")
-			if r then table.insert(lines, ("%d/%d Assets gespeichert (Animationen, Sounds, Bilder)."):format(r.saved, r.total)) end
+			if r then
+				table.insert(lines, ("%d/%d Assets gespeichert (Animationen, Sounds, Bilder)."):format(r.saved, r.total))
+				for _, e in r.errors do table.insert(lines, ("%s: %s"):format(e.id, e.error)) end
+			end
 			allOk = allOk and r ~= nil and r.saved == r.total
 		end
 		btn.Active, btn.Text = true, idleText
-		status.TextColor3, status.Text = (allOk and stored) and OK or BAD, table.concat(lines, "\n")
+		status.TextColor3, status.Text = (allOk and stored and embedded == #anims) and OK or BAD, table.concat(lines, "\n")
 	end
 
 	csDownloadBtn.Activated:Connect(function() downloadCutscene(false, csDownloadBtn, "Herunterladen") end)
 	csRepairBtn.Activated:Connect(function() downloadCutscene(true, csRepairBtn, "Mein Account") end)
+
+	-- Animations-Ordner -------------------------------------------------------------------------
+	do -- eigener Block: seine Variablen zählen danach nicht mehr gegen Luaus Grenze von 200
+		-- Lässt den Server die Animation unter deinem Account neu hochladen. Gibt die neue ID oder nil, Fehler.
+		local function reuploadAnim(id, name)
+			local url = ("%s/api/plugin-upload-anim?q=%s&user=%d&place=%s&name=%s"):format(SERVER, id,
+				game:GetService("StudioService"):GetUserId(), HttpService:UrlEncode(placeBox.Text), HttpService:UrlEncode(name))
+			local ok, res = pcall(HttpService.RequestAsync, HttpService, { Url = url, Headers = PLUGIN_HEADERS, Method = "GET" })
+			if not ok then return nil, "Server nicht erreichbar oder Zeitüberschreitung" end
+			local okJson, body = pcall(HttpService.JSONDecode, HttpService, res.Body)
+			if not res.Success then return nil, okJson and body.error or ("HTTP " .. res.StatusCode) end
+			return okJson and body.id or nil, "Antwort unlesbar"
+		end
+
+		-- Auswahl mit allen Unterordnern als eine .rbxm, jede Animation mit ihrer KeyframeSequence.
+		-- upload: vorher alles unter deiner ID hochladen und die neuen IDs einsetzen.
+		local function saveAnimFolder(upload, btn, idleText)
+			local out = animUi.label
+			local sel = Selection:Get()
+			if #sel == 0 then
+				out.TextColor3, out.Text = BAD, "Erst den Ordner mit den Animationen im Explorer anklicken (z. B. Anubis)."
+				return
+			end
+			if not btn.Active then return end
+			local roots, anims = {}, {}
+			for _, obj in sel do
+				local ok, copy = pcall(function() return obj:Clone() end)
+				if ok and copy then table.insert(roots, copy) end
+			end
+			for _, r in roots do
+				local list = r:GetDescendants()
+				table.insert(list, 1, r)
+				for _, a in list do
+					if a:IsA("Animation") and animId(a) then table.insert(anims, a) end
+				end
+			end
+			if #anims == 0 then
+				for _, r in roots do r:Destroy() end
+				out.TextColor3, out.Text = BAD, "In der Auswahl steckt keine Animation mit ID."
+				return
+			end
+			btn.Active = false
+			local name = #sel == 1 and sel[1].Name or ("%s +%d"):format(sel[1].Name, #sel - 1)
+			if upload then name ..= " (meine IDs)" end
+			local ids, nameOf = {}, {}
+			for _, a in anims do
+				local id = animId(a)
+				if not nameOf[id] then
+					nameOf[id] = a.Name
+					table.insert(ids, id)
+				end
+			end
+			local errors, map, clips, uploaded = {}, {}, 0, 0
+			-- 6 gleichzeitig: einzeln dauert ein ganzer Charakter (60 Animationen) über eine Minute.
+			local loadedCount, running = 0, 0
+			btn.Text = progress("Lade Animationen", 0, #ids)
+			for _, id in ids do
+				while running >= 6 do task.wait() end
+				running += 1
+				task.spawn(function()
+					pcall(fetchClip, id) -- ein Fehler darf den Zähler nicht hängen lassen
+					running -= 1
+					loadedCount += 1
+					btn.Text = progress("Lade Animationen", loadedCount, #ids)
+				end)
+			end
+			while running > 0 do task.wait() end
+			for _, id in ids do
+				if fetchClip(id) then clips += 1 else table.insert(errors, ("%s (%s): nicht ladbar"):format(nameOf[id], id)) end
+			end
+			if upload then
+				local known = plugin:GetSetting("repairedAnims") or {}
+				local user = tostring(game:GetService("StudioService"):GetUserId())
+				for i, id in ids do
+					btn.Text = progress("Lade hoch", i - 1, #ids)
+					local k = user .. ":" .. id
+					if known[k] then
+						map[id] = known[k]
+					elseif fetchClip(id) then
+						local newId, err = reuploadAnim(id, nameOf[id])
+						if newId then
+							map[id], known[k] = newId, newId
+						else
+							table.insert(errors, ("%s (%s): %s"):format(nameOf[id], id, err))
+						end
+					end
+					if map[id] then uploaded += 1 end
+				end
+				plugin:SetSetting("repairedAnims", known)
+			end
+			local replaced = 0
+			for _, a in anims do
+				local id = animId(a)
+				for _, c in a:GetChildren() do
+					if c:IsA("AnimationClip") then c:Destroy() end
+				end
+				local clip = fetchClip(id)
+				if clip and not upload then
+					-- Herunterladen: nur die Keyframes, ohne Asset-ID, wie aus dem Animation Editor gespeichert.
+					local copy = clip:Clone()
+					copy.Name, copy.Parent = a.Name, a.Parent
+					local index = table.find(roots, a)
+					if index then roots[index] = copy end
+					a:Destroy()
+					replaced += 1
+				else
+					-- Unter meiner ID (oder nicht ladbar): Animation-Objekt bleibt, das Spiel braucht die ID.
+					if clip then clip:Clone().Parent = a end
+					if map[id] then a.AnimationId = "rbxassetid://" .. map[id] end
+				end
+			end
+			local lines = { upload and ("%d Animationen (%d verschiedene), %d mit KeyframeSequence."):format(#anims, #ids, clips)
+				or ("%d/%d Animationen als KeyframeSequence gespeichert (ohne Asset-ID)."):format(replaced, #anims) }
+			if upload then
+				table.insert(lines, ("%d/%d unter deiner ID hochgeladen, die neuen IDs stehen in der Datei."):format(uploaded, #ids))
+				local found, texIds = collectTextures(roots), {}
+				for tid in found do table.insert(texIds, tid) end
+				if #texIds > 0 then
+					local texLines = repairTextures(found, texIds, btn)
+					for _, l in texLines do table.insert(lines, l) end
+				end
+			end
+			btn.Text = "Speichere Datei …"
+			task.wait()
+			local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, roots)
+			for _, r in roots do r:Destroy() end
+			local stored = okSer and store(name, "", buffer.tostring(buf), btn)
+			local savedLine = stored and ("Gespeichert: downloads/%s/%s.rbxm (in Studio: Rechtsklick > Insert from File)"):format(name, name)
+				or "Datei konnte nicht gespeichert werden. Läuft start.bat?"
+			table.insert(lines, savedLine)
+			for i, e in errors do
+				if i > 8 then
+					table.insert(lines, ("… und %d weitere"):format(#errors - 8))
+					break
+				end
+				table.insert(lines, e)
+			end
+			btn.Active, btn.Text = true, idleText
+			out.TextColor3, out.Text = (stored and #errors == 0) and OK or BAD, table.concat(lines, "\n")
+			status.TextColor3, status.Text = out.TextColor3, savedLine
+		end
+
+		-- KeyframeSequence ohne ID (z. B. aus Herunterladen) als eigene Animation hochladen. Gibt neue ID oder nil, Fehler.
+		local function uploadClip(ks, user)
+			local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, { ks })
+			if not okSer then return nil, "ließ sich nicht als Datei speichern" end
+			local url = ("%s/api/plugin-upload-anim-file?user=%d&name=%s"):format(SERVER, user, HttpService:UrlEncode(ks.Name))
+			local ok, res = pcall(HttpService.RequestAsync, HttpService,
+				{ Url = url, Headers = PLUGIN_HEADERS, Method = "POST", Body = (buffer.tostring(buf):gsub(".", HEX)) })
+			if not ok then return nil, "Server nicht erreichbar oder Zeitüberschreitung" end
+			local okJson, body = pcall(HttpService.JSONDecode, HttpService, res.Body)
+			if not res.Success then return nil, okJson and body.error or ("HTTP " .. res.StatusCode) end
+			return okJson and body.id or nil, "Antwort unlesbar"
+		end
+
+		-- Ordner mit losen KeyframeSequences: alle hochladen, danach steckt jede in einer Animation mit der neuen ID,
+		-- gleicher Name, gleicher Ort. Gibt false, wenn in der Auswahl keine lose KeyframeSequence ist.
+		local function uploadKeyframes(btn, idleText)
+			local out, list = animUi.label, {}
+			for _, root in Selection:Get() do
+				local all = root:GetDescendants()
+				table.insert(all, 1, root)
+				for _, ks in all do
+					if ks:IsA("KeyframeSequence") and not (ks.Parent and ks.Parent:IsA("Animation")) then table.insert(list, ks) end
+				end
+			end
+			if #list == 0 then return false end
+			if not btn.Active then return true end
+			btn.Active = false
+			local user = game:GetService("StudioService"):GetUserId()
+			local ids, errors, done, running = {}, {}, 0, 0
+			btn.Text = progress("Lade hoch", 0, #list)
+			for _, ks in list do
+				while running >= 3 do task.wait() end -- 3 gleichzeitig, Roblox begrenzt Uploads pro Minute
+				running += 1
+				task.spawn(function()
+					local ok, newId, err = pcall(uploadClip, ks, user)
+					if ok and newId then ids[ks] = newId else table.insert(errors, ("%s: %s"):format(ks.Name, tostring(ok and err or newId))) end
+					running -= 1
+					done += 1
+					btn.Text = progress("Lade hoch", done, #list)
+				end)
+			end
+			while running > 0 do task.wait() end
+			local rec = ChangeHistoryService:TryBeginRecording("Animationen unter meiner ID")
+			local count = 0
+			for _, ks in list do
+				if ids[ks] and ks.Parent then
+					local anim = Instance.new("Animation")
+					anim.Name, anim.AnimationId = ks.Name, "rbxassetid://" .. ids[ks]
+					anim.Parent = ks.Parent
+					ks.Parent = anim -- bleibt bearbeitbar, steckt jetzt in der Animation
+					count += 1
+				end
+			end
+			if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+			local lines = { ("%d/%d Animationen unter deiner ID hochgeladen. Jede steckt jetzt in einer Animation mit der neuen ID, am selben Ort (Strg+Z macht es rückgängig)."):format(count, #list) }
+			for i, e in errors do
+				if i > 8 then
+					table.insert(lines, ("… und %d weitere"):format(#errors - 8))
+					break
+				end
+				table.insert(lines, e)
+			end
+			btn.Active, btn.Text = true, idleText
+			out.TextColor3, out.Text = #errors == 0 and OK or BAD, table.concat(lines, "\n")
+			status.TextColor3, status.Text = out.TextColor3, lines[1]
+			return true
+		end
+
+		animUi.save.Activated:Connect(function() saveAnimFolder(false, animUi.save, "Herunterladen") end)
+		animUi.upload.Activated:Connect(function()
+			-- Lose Keyframes (ohne ID) direkt hochladen, sonst Animationen mit fremder ID neu hochladen und als Datei sichern.
+			if not uploadKeyframes(animUi.upload, "Unter meiner ID") then saveAnimFolder(true, animUi.upload, "Unter meiner ID") end
+		end)
+	end
+
+	-- Abspielen -------------------------------------------------------------------------------
+	-- Der Cutscene-Code läuft nicht: Er braucht den CutsceneController und die Daten des Spiels. Stattdessen macht
+	-- das Plugin, was dieser Controller macht: Rigs kopieren, Animationen abspielen, Kamera an CamPart hängen, FOV.
+	local CS_AUTOPLAY = "cutsceneAutoplay" -- Plugin-Setting: Namenspfad der Cutscene, die jeder Play-Test abspielt
+	local CS_COPY = "AssetDownloaderCutscene" -- Kopie in ReplicatedStorage, wenn nur der Server die Cutscene sieht
+	local PLAYER_KEYS = { player = true, players = true, characterrig = true, character = true, fakeplayer = true,
+		templater6 = true, clone = true, localplayer = true }
+	-- Kamera heißt cam, camera, camerarig …, aber nicht "Camper2" (BoomFamily).
+	local function isCamKey(k) return k == "cam" or k:match("^camera") ~= nil end
+	local playing = nil -- { model, tracks, stop = Funktion, restore = Funktion }
+
+	local function key(s)
+		local k = s:lower():gsub("[%s_%-%.]", "")
+		k = k:gsub("animation$", ""):gsub("anim$", "")
+		return k
+	end
+
+	local function holderOf(m)
+		return m:FindFirstChildWhichIsA("Humanoid") or m:FindFirstChildWhichIsA("AnimationController")
+	end
+
+	local function rootOf(m)
+		-- HumanoidRootPart vor PrimaryPart: Bei R6 ist PrimaryPart oft der Kopf.
+		return m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("RootPart") or m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+	end
+
+	-- Teil, dem die Kamera folgt, wie im Spiel: CamPart, sonst Camera, sonst das letzte Teil mit "cam" (Beatdown: camera3).
+	local function camPartOf(rig)
+		local named, other = nil, {}
+		for _, p in rig:GetDescendants() do
+			if p:IsA("BasePart") then
+				local n = p.Name:lower()
+				if n == "campart" then return p end
+				if n == "camera" then
+					named = named or p
+				elseif n:find("cam") and not n:find("root") then
+					table.insert(other, p)
+				end
+			end
+		end
+		table.sort(other, function(a, b) return a.Name < b.Name end)
+		return named or other[#other]
+	end
+
+	-- Auswahl zur Cutscene: Download-Ordner (Code + Objekte) oder das Cutscene-Script, auch über ein Unter-Modul.
+	local function cutsceneSource(sel)
+		local code = sel:FindFirstChild("Code")
+		if code and sel:FindFirstChild("Objekte") then
+			local best, most = nil, -1
+			for _, c in code:GetChildren() do
+				local n = 0
+				for _, d in c:GetDescendants() do
+					if d:IsA("Animation") then n += 1 end
+				end
+				if n > most then best, most = c, n end
+			end
+			sel = best or sel
+		end
+		while not sel:FindFirstChildWhichIsA("Animation", true) and sel.Parent and sel.Parent:IsA("LuaSourceContainer") do
+			sel = sel.Parent
+		end
+		return sel
+	end
+
+	local function clipOf(a)
+		local clip = a:FindFirstChildWhichIsA("AnimationClip")
+		if clip then return clip end
+		return animId(a) and fetchClip(animId(a)) or nil
+	end
+
+	-- Eingebettet oder vom Server: über RegisterAnimationClip, sonst die Original-ID (geht nur in der eigenen Place).
+	local function trackFor(holder, a)
+		local animator = holder:FindFirstChildOfClass("Animator") or Instance.new("Animator", holder)
+		local anim = Instance.new("Animation")
+		anim.AnimationId = a.AnimationId
+		local clip = clipOf(a)
+		if clip then
+			local ok, active = pcall(AnimationClipProvider.RegisterAnimationClip, AnimationClipProvider, clip)
+			if ok then anim.AnimationId = active end
+		end
+		local ok, t = pcall(animator.LoadAnimation, animator, anim)
+		if not ok then return nil end
+		t.Priority, t.Looped = Enum.AnimationPriority.Action4, false
+		return t, animator
+	end
+
+	-- FOV pro Frame (60 pro Sekunde) aus dem FOVData-Modul, so wie der CutsceneController es liest.
+	local function fovFrames(src)
+		for _, m in src:GetDescendants() do
+			if m:IsA("ModuleScript") and m.Name:lower():find("fov") then
+				local ok, frames = pcall(function() return require(m).Data.CurrentCamera.Properties.FieldOfView.Frames end)
+				if ok and type(frames) == "table" then return frames end
+			end
+		end
+		return nil
+	end
+
+	-- Kopie der Cutscene: alles außer Scripts und GUIs. Aus "Loaded" (vorbereitete Rigs) nur, was oben fehlt.
+	local function buildCutscene(src)
+		local model = Instance.new("Model")
+		model.Name, model.Archivable = "Cutscene-Vorschau", false
+		local loadedFolder, top = src:FindFirstChild("Loaded"), {} -- top: Name -> wie oft oben schon
+		local function copyIn(obj)
+			local ok, copy = pcall(function() return obj:Clone() end)
+			if ok and copy then copy.Parent = model end
+		end
+		for _, c in src:GetChildren() do
+			if c ~= loadedFolder and not c:IsA("LuaSourceContainer") and not c:IsA("LayerCollector") then
+				top[c.Name] = (top[c.Name] or 0) + 1
+				copyIn(c)
+			end
+		end
+		-- Loaded hat oft mehrere Kopien (Stage2Start: 4 Pferde, oben nur 1): nur die, die oben fehlen.
+		for _, c in loadedFolder and loadedFolder:GetChildren() or {} do
+			if c:IsA("Model") and holderOf(c) then
+				if (top[c.Name] or 0) > 0 then top[c.Name] -= 1 else copyIn(c) end
+			end
+		end
+		for _, d in model:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.CanCollide, d.CanTouch, d.CanQuery = false, false, false
+			elseif d:IsA("LuaSourceContainer") then
+				d:Destroy()
+			end
+		end
+		return model
+	end
+
+	-- Welche Animation auf welches Rig: "Camera" aufs Kamera-Rig, sonst gleicher Name (Horse, Figure, Boom2 …),
+	-- bei Nummern der Ordnername (Animations.Horses.1). Spieler-Animationen ohne Rig kommen in players.
+	local function assign(model, anims)
+		local rigs, used, pairs_, players = {}, {}, {}, {}
+		for _, d in model:GetDescendants() do
+			if d:IsA("Model") and holderOf(d) then table.insert(rigs, d) end
+		end
+		-- Kamera-Rig: Rig namens Cam/CameraRig …, sonst ein Rig, in dem CamPart steckt (MatchStart: Main.Cam.CamPart).
+		local camRig = nil
+		for _, r in rigs do
+			if isCamKey(key(r.Name)) and camPartOf(r) then
+				camRig = r
+				break
+			end
+		end
+		if not camRig then
+			for _, r in rigs do
+				local p = camPartOf(r)
+				if p and (p.Name:lower() == "campart" or p.Name:lower() == "camera") then
+					camRig = r
+					break
+				end
+			end
+		end
+		if camRig and isCamKey(key(camRig.Name)) then used[camRig] = true end
+		local names = {}
+		for _, a in anims do names[key(a.Name)] = true end
+		local function find(cands, exact)
+			for _, c in cands do
+				for _, r in rigs do
+					local k = key(r.Name)
+					if not used[r] and c ~= "" and (k == c or (not exact and #c >= 3 and k:find(c, 1, true))) then return r end
+				end
+			end
+			return nil
+		end
+		local function playerRig()
+			for _, r in rigs do
+				if not used[r] and PLAYER_KEYS[key(r.Name)] then return r end
+			end
+			return nil
+		end
+		local leftover = {}
+		for _, a in anims do
+			local k = key(a.Name)
+			local base = k:gsub("idle$", "")
+			local folder = a.Parent and a.Parent:IsA("Folder") and key(a.Parent.Name) or ""
+			if folder == "animations" or folder == "anims" then folder = "" end
+			local single = folder:gsub("s$", "")
+			if base ~= k and names[base] then
+				continue -- Idle-Variante, wenn es die eigentliche Animation auch gibt
+			elseif isCamKey(base) then
+				if camRig and not pairs_[camRig] then
+					used[camRig], pairs_[camRig] = true, a
+				end
+			else
+				-- Ordner zuerst, damit Horse.Boom3 aufs Pferd Horse_Boom3 geht und nicht auf den Reiter Boom3.
+				local cands = tonumber(k) and { folder, single } or { folder .. k, single .. k, k, base }
+				local isPlayer = PLAYER_KEYS[base] or PLAYER_KEYS[folder] or PLAYER_KEYS[single]
+				local rig = find(cands, true) or find(cands, false) or (isPlayer and playerRig())
+				if rig then
+					used[rig], pairs_[rig] = true, a
+				elseif isPlayer then
+					table.insert(players, a)
+				else
+					table.insert(leftover, a)
+				end
+			end
+		end
+		-- Übrige Animationen auf übrige Rigs, wenn die Zahl aufgeht (Stage1Finish: Horse auf Victory).
+		local freeRigs = {}
+		for _, r in rigs do
+			if not used[r] and not PLAYER_KEYS[key(r.Name)] then table.insert(freeRigs, r) end
+		end
+		if #leftover > 0 and #leftover == #freeRigs then
+			for i, a in leftover do pairs_[freeRigs[i]] = a end
+			leftover = {}
+		end
+		-- Am Spieler hängt die Cutscene, wenn es kein Spieler-Rig gibt und sonst nur die Kamera (Barrage, GyroUlt)
+		-- oder Spieler-Animationen auf einen Spieler warten (CloneAnim).
+		local hasPlayerRig, others = false, 0
+		for _, r in rigs do
+			if PLAYER_KEYS[key(r.Name)] then hasPlayerRig = true end
+			if r ~= camRig then others += 1 end
+		end
+		return camRig, pairs_, players, leftover, not hasPlayerRig and (#players > 0 or others == 0)
+	end
+
+	local function stopCutscene(text)
+		local p = playing
+		if not p then return end
+		playing = nil
+		p.stop()
+		for _, t in p.tracks do pcall(function() t:Stop(0) end) end
+		p.model:Destroy()
+		p.restore()
+		csPlay.play.Text = "Abspielen"
+		if text then csPlay.label.TextColor3, csPlay.label.Text = MUTED, text end
+	end
+
+	-- Spielt die Cutscene einmal ab. character: im Play-Test die eigene Figur, im Edit-Modus nil (dann ein Dummy).
+	-- Gibt (ok, Text für die Anzeige).
+	local function playCutscene(src, character)
+		stopCutscene()
+		local anims = {}
+		for _, a in src:GetDescendants() do
+			if a:IsA("Animation") then table.insert(anims, a) end
+		end
+		if #anims == 0 then
+			return false, ("In %s steckt keine Animation. Das Cutscene-Script oder den Download-Ordner anklicken."):format(src.Name)
+		end
+		local editing = not RunService:IsRunning()
+		local model = buildCutscene(src)
+		local camRig, pairs_, players, leftover, attach = assign(model, anims)
+		local camPart = camRig and camPartOf(camRig)
+		local camRoot = camRig and rootOf(camRig)
+
+		-- Ohne Spieler-Rig hängt die Cutscene am Spieler (im Spiel per Motor6D CONNECT): Kamera-Rig an die Figur.
+		local subject, hrp, hrpAnchored = nil, nil, nil
+		if attach and camRoot then
+			if character and character:FindFirstChild("HumanoidRootPart") then
+				hrp = character.HumanoidRootPart
+				model:PivotTo(hrp.CFrame * camRoot.CFrame:Inverse() * model:GetPivot())
+				hrpAnchored, hrp.Anchored = hrp.Anchored, true
+				subject = character
+			else
+				local dummy = makeRig(players[1] and clipOf(players[1]) or nil)
+				if dummy then
+					dummy.Name = "Spieler (Dummy)"
+					dummy:PivotTo(camRoot.CFrame)
+					dummy.Parent = model
+					subject = dummy
+				end
+			end
+		end
+
+		model.Parent = workspace
+		local tracks, animators, missing = {}, {}, {}
+		local function start(rig, a)
+			local holder = holderOf(rig) or rig:FindFirstChildWhichIsA("Humanoid", true)
+			local root = rootOf(rig)
+			if root and rig ~= character then
+				fixRigRoot(rig, root) -- ein verankerter Kopf oder Arm bliebe sonst stehen
+				root.Anchored = true
+			end
+			local t, animator = nil, nil
+			if holder then t, animator = trackFor(holder, a) end
+			if t then
+				table.insert(tracks, t)
+				animators[animator] = true
+			else
+				table.insert(missing, a.Name)
+			end
+			return t
+		end
+		local camTrack = nil
+		for rig, a in pairs_ do
+			local t = start(rig, a)
+			if rig == camRig then camTrack = t end
+		end
+		if subject and players[1] then start(subject, players[1]) end
+		if #tracks == 0 then
+			model:Destroy()
+			if hrp then hrp.Anchored = hrpAnchored end
+			return false, "Keine Animation ließ sich laden. Läuft start.bat? Bei gesperrten IDs den Spiel-Link im Tab Laden eintragen."
+		end
+		for _, t in tracks do t:Play(0) end
+		-- Wie im Spiel: warten, bis die Länge bekannt ist (höchstens 3 s).
+		local function length()
+			if camTrack then return camTrack.Length end
+			local l = 0
+			for _, t in tracks do l = math.max(l, t.Length) end
+			return l
+		end
+		local waited = os.clock()
+		while length() <= 0 and os.clock() - waited < 3 do
+			if editing then
+				for animator in animators do animator:StepAnimations(0) end
+			end
+			task.wait()
+		end
+		local duration = length()
+
+		local cam = workspace.CurrentCamera
+		local saved = { cam.CameraType, cam.CFrame, cam.Focus, cam.FieldOfView, cam.CameraSubject }
+		local frames = fovFrames(src)
+		local began = os.clock()
+		local done = false
+		local function step(dt)
+			if editing then
+				for animator in animators do animator:StepAnimations(dt) end
+			end
+			local elapsed = os.clock() - began
+			if camPart then
+				cam.CameraType = Enum.CameraType.Scriptable
+				cam.CFrame, cam.Focus = camPart.CFrame, camPart.CFrame
+			end
+			local fov = frames and frames[math.max(1, math.ceil(elapsed * 60))]
+			if fov then cam.FieldOfView = fov end
+			if elapsed > duration + 0.1 and not done then
+				done = true
+				task.defer(stopCutscene, ("%s fertig abgespielt."):format(src.Name))
+			end
+		end
+		local stop
+		if editing then
+			local conn = RunService.Heartbeat:Connect(step)
+			stop = function() conn:Disconnect() end
+		else
+			-- Als Letztes vor dem Zeichnen, sonst setzt das Kamera-Script des Spiels die Kamera zurück.
+			RunService:BindToRenderStep(CS_COPY, Enum.RenderPriority.Last.Value, step)
+			stop = function() RunService:UnbindFromRenderStep(CS_COPY) end
+		end
+		playing = {
+			model = model, tracks = tracks, stop = stop,
+			restore = function()
+				cam.FieldOfView = saved[4]
+				if editing then
+					-- Scriptable sperrt im Edit-Modus Drehen und Zoomen, deshalb nie Scriptable zurücksetzen.
+					cam.CameraType = saved[1] == Enum.CameraType.Scriptable and Enum.CameraType.Fixed or saved[1]
+					cam.CFrame, cam.Focus = saved[2], saved[3]
+				else
+					cam.CameraType, cam.CameraSubject = Enum.CameraType.Custom, saved[5]
+				end
+				if hrp then hrp.Anchored = hrpAnchored end
+			end,
+		}
+		csPlay.play.Text = "Stopp"
+
+		local info = { ("%s: %d Animationen, %.1f s"):format(src.Name, #tracks, duration) }
+		table.insert(info, camPart and ("Kamera folgt %s"):format(camPart:GetFullName():sub(#model:GetFullName() + 2))
+			or "Kein Kamera-Rig gefunden, die Kamera bleibt stehen.")
+		if subject then table.insert(info, character and "Spieler-Teil läuft auf deiner Figur." or "Spieler-Teil läuft auf einem Dummy.") end
+		if #missing > 0 then table.insert(info, "Nicht ladbar: " .. table.concat(missing, ", ")) end
+		local skipped = {}
+		for _, a in leftover do table.insert(skipped, a.Name) end
+		for i = 2, #players do table.insert(skipped, players[i].Name) end
+		if #skipped > 0 then table.insert(info, "Ohne passendes Rig übersprungen: " .. table.concat(skipped, ", ")) end
+		return true, table.concat(info, "\n")
+	end
+
+	csPlay.play.Activated:Connect(function()
+		if playing then
+			stopCutscene("Gestoppt.")
+			return
+		end
+		local sel = Selection:Get()[1]
+		if not sel then
+			csPlay.label.TextColor3, csPlay.label.Text = BAD, "Erst die Cutscene im Explorer anklicken: das Cutscene-Script oder den eingefügten Download-Ordner."
+			return
+		end
+		csPlay.play.Text = "Lade …"
+		local character = RunService:IsRunning() and Players.LocalPlayer and Players.LocalPlayer.Character or nil
+		local ok, text = playCutscene(cutsceneSource(sel), character)
+		if not playing then csPlay.play.Text = "Abspielen" end
+		csPlay.label.TextColor3, csPlay.label.Text = ok and OK or BAD, text
+	end)
+	plugin.Unloading:Connect(function() stopCutscene() end)
+
+	-- Beim Play-Test ---------------------------------------------------------------------------
+	local function showAuto()
+		local names = plugin:GetSetting(CS_AUTOPLAY)
+		csPlay.auto.Text = names and "Beim Play-Test: an" or "Beim Play-Test: aus"
+		csPlay.auto.BackgroundColor3 = names and GREEN or GREY
+		return names
+	end
+	showAuto()
+
+	csPlay.auto.Activated:Connect(function()
+		if plugin:GetSetting(CS_AUTOPLAY) then
+			plugin:SetSetting(CS_AUTOPLAY, nil)
+			showAuto()
+			csPlay.label.TextColor3, csPlay.label.Text = MUTED, "Play-Test spielt keine Cutscene mehr ab."
+			return
+		end
+		local sel = Selection:Get()[1]
+		if not sel then
+			csPlay.label.TextColor3, csPlay.label.Text = BAD, "Erst die Cutscene im Explorer anklicken."
+			return
+		end
+		local src, names = cutsceneSource(sel), {}
+		local cur = src
+		while cur and cur ~= game do
+			table.insert(names, 1, cur.Name)
+			cur = cur.Parent
+		end
+		plugin:SetSetting(CS_AUTOPLAY, names)
+		showAuto()
+		csPlay.label.TextColor3, csPlay.label.Text = OK, ("Jeder Play-Test (F5) spielt %s einmal ab, sobald deine Figur da ist."):format(src.Name)
+	end)
+
+	-- Namenspfad wie { "ReplicatedStorage", "Effects", "Cutscenes", "Death" } zum Objekt. wait: Sekunden pro Stufe.
+	local function resolve(names, wait)
+		local cur = game
+		for _, n in names do
+			cur = if wait then cur:WaitForChild(n, wait) else cur:FindFirstChild(n)
+			if not cur then return nil end
+		end
+		return cur
+	end
+
+	local autoNames = RunService:IsRunning() and plugin:GetSetting(CS_AUTOPLAY)
+	if autoNames and RunService:IsServer() then
+		-- Liegt die Cutscene z. B. in ServerStorage, sieht der Client sie nicht: Kopie nach ReplicatedStorage.
+		local src = resolve(autoNames)
+		local rs = game:GetService("ReplicatedStorage")
+		if src and not (src:IsDescendantOf(rs) or src:IsDescendantOf(workspace)) then
+			local ok, copy = pcall(function() return src:Clone() end)
+			if ok and copy then copy.Name, copy.Parent = CS_COPY, rs end
+		end
+	elseif autoNames and RunService:IsClient() then
+		task.spawn(function()
+			local player = Players.LocalPlayer
+			local character = player.Character or player.CharacterAdded:Wait()
+			character:WaitForChild("HumanoidRootPart", 10)
+			task.wait(2) -- erst die Kamera-Scripts des Spiels starten lassen
+			local src = game:GetService("ReplicatedStorage"):FindFirstChild(CS_COPY) or resolve(autoNames, 10)
+			if not src then
+				warn(("[Asset Downloader] Cutscene für den Play-Test nicht gefunden: %s"):format(table.concat(autoNames, " > ")))
+				return
+			end
+			local ok, text = playCutscene(cutsceneSource(src), player.Character or character)
+			print("[Asset Downloader] " .. (text:gsub("\n", " · ")))
+			csPlay.label.TextColor3, csPlay.label.Text = ok and OK or BAD, text
+		end)
+	end
 end
 
 -- Aufnahme im Play-Test --------------------------------------------------------------------

@@ -39,16 +39,17 @@ Oben auf der Seite steht, ob der Login aktiv ist.
 
 ### Roblox Studio Plugin
 
-Fenster direkt in Studio mit vier Tabs. Neben jedem Knopf erklärt ein **i**, was er macht.
+Fenster direkt in Studio mit mehreren Tabs. Neben jedem Knopf erklärt ein **i**, was er macht.
 
 1. `plugin-installieren.bat` doppelklicken und Studio neu starten.
 2. `start.bat` starten. Das Plugin redet mit diesem lokalen Server, er muss laufen.
 3. In Studio: Tab **Plugins** → **Asset Downloader**. Beim ersten Laden fragt Studio, ob das Plugin `127.0.0.1` erreichen darf: **Allow**.
 
 **Laden**
-- ID oder Link eingeben und **Laden**, oder im Explorer etwas anklicken und **Aus Explorer-Auswahl**. Die ID wird dann automatisch übernommen.
+- ID oder Link eingeben und **Laden**, oder im Explorer etwas anklicken und **Aus Explorer-Auswahl**. Die ID wird dann automatisch übernommen. Eine Animationsdatei ohne ID (KeyframeSequence, z. B. per Insert from File eingefügt) kommt direkt in die Vorschau.
 - Vorschau: Models und Meshes drehen sich (Maus ziehen dreht, Mausrad zoomt). Animationen laufen auf einem farbigen Dummy oder dem ausgewählten Rig. Bilder werden angezeigt, Audio hat **Abspielen**.
-- **Platzieren** setzt das Asset vor die Kamera, mit allen Einstellungen. Animationen landen in `AnimSaves` des ausgewählten Rigs, sonst in `ServerStorage`. Bei VFX löst **Abspielen** die Emitter aus.
+- **Platzieren** setzt das Asset vor die Kamera, mit allen Einstellungen. Animationen landen in `AnimSaves` des ausgewählten Rigs, sonst in `ServerStorage`.
+- **Abspielen**: Animationen laufen auf einem Dummy 12 Studs vor deiner Kamera (ist ein Rig ausgewählt, auf einer Kopie davon). Nochmal drücken entfernt ihn. Bei VFX löst es die Emitter aus.
 - **Herunterladen** speichert nach `downloads/`. Models und VFX bekommen einen Ordner mit `.rbxm` und allen Texturen.
 - **Herunterladen unter meinem Namen** lädt die Texturen erst unter deinem Account hoch und speichert dann mit deinen neuen IDs.
 
@@ -60,6 +61,17 @@ Fenster direkt in Studio mit vier Tabs. Neben jedem Knopf erklärt ein **i**, wa
 - **Reparieren und sichern**: Texturen unter deinem Namen hochladen, IDs tauschen, alles nach `downloads/<Name>/`.
 - **Nur sichern**: `.rbxm` und Texturen speichern, ohne Hochladen.
 - **Auswahl abspielen**: Emitter auslösen. Lose Attachments kommen dafür an ein unsichtbares Teil.
+
+**Animations-Ordner** (Tab VFX): Ordner mit Animationen anklicken, z. B. einen ganzen Charakter wie `Anubis`.
+- **Herunterladen** speichert alles als eine Datei `downloads/<Name>/<Name>.rbxm`, mit allen Unterordnern und Namen wie im Explorer (z. B. `Anubis > Attack > M1`). Jede Animation liegt dort als KeyframeSequence mit ihrem Namen, ohne Asset-ID, wie aus dem Animation Editor. In einer anderen Place: Rechtsklick > Insert from File.
+- **Unter meiner ID** bei einem Ordner mit KeyframeSequences (z. B. aus Herunterladen eingefügt): lädt alle auf einmal unter deinem Account hoch. Danach steckt jede in einer Animation mit deiner neuen ID, gleicher Name, gleicher Ort. Kein Rechtsklick > Save to Roblox pro Animation.
+- **Unter meiner ID** bei Animationen aus einem Spiel (fremde IDs) lädt jede Animation (und Bilder) unter deinem Account hoch. In der Datei bleiben die Animation-Objekte mit deinen neuen IDs, jeweils mit der KeyframeSequence darin. Datei: `downloads/<Name> (meine IDs)/`. Schon hochgeladene Animationen merkt sich der Server in `uploads.json`. Braucht `apikey.txt` mit Assets Read + Write.
+
+**Cutscene:** Cutscene-Script im Explorer anklicken.
+- **Herunterladen** speichert alles, was die Cutscene braucht, nach `downloads/<Name>/` und zeigt dabei Prozent. Jede Animation steckt zusätzlich als KeyframeSequence in ihrem Animation-Objekt, damit die Cutscene in jeder Place läuft.
+- **Abspielen**: Cutscene-Script oder den eingefügten Download-Ordner anklicken. Die Kamera fliegt wie im Spiel mit, jedes Rig spielt seine Animation. Geht im Edit-Modus und im Play-Test.
+- **Beim Play-Test** merkt sich die angeklickte Cutscene. Jeder Play-Test spielt sie dann einmal ab, sobald deine Figur da ist.
+- Nicht nachgebaut werden Effekte, die der Code zu bestimmten Zeitpunkten auslöst (Partikel-Bursts, Sounds, Bildschirm-Effekte).
 
 #### Hochladen unter deinem Namen einrichten (einmalig)
 
@@ -91,8 +103,9 @@ Lädt alles nach `downloads/`. Mit `-o ORDNER` kannst du einen anderen Zielordne
 
 - Erkannt werden IDs, `rbxassetid://`-Links, Catalog-, Library-, Bundle- und Creator-Store-Links.
 - Dateien heißen `Name (ID).endung`. Die Endung wird am Inhalt erkannt (`.rbxm`, `.rbxmx`, `.ogg`, `.mp3`, `.png`, `.mesh` …).
-- Viele Animationen und Sounds gibt Roblox nur im Kontext des Spiels heraus, das sie benutzen darf. Das Tool probiert automatisch die Spiele des Erstellers. Klappt es über ein Spiel, merkt es sich das in `places.txt` und nutzt es für alle weiteren Assets. Beim Bulk-Download bekommen Fehlschläge deshalb eine zweite Runde.
+- Viele Animationen und Sounds gibt Roblox nur im Kontext des Spiels heraus, das sie benutzen darf. Das Tool probiert automatisch die Spiele des Erstellers, bei Gruppen auch private Test-Places, bei Usern auch die Spiele ihrer eigenen Gruppen. Klappt es über ein Spiel, merkt es sich das in `places.txt` und nutzt es für alle weiteren Assets. Beim Bulk-Download bekommen Fehlschläge deshalb eine zweite Runde.
 - Wenn trotzdem „Kein Zugriff“ kommt: Im Feld **Spiel** den Link des Spiels einfügen, aus dem die IDs stammen (Kommandozeile: `--place LINK`).
+- „Privates Audio“ heißt, der Ersteller hat das Audio privat gestellt. Roblox gibt es nur ihm oder Spielen, die er freigegeben hat, auch im Spielkontext nicht. Das lässt sich nicht herunterladen.
 - „Von Roblox nicht freigegeben (moderiert)“ heißt, Roblox hat das Asset gesperrt. Das kann niemand mehr herunterladen.
 - Binäre `.rbxm`/`.rbxl`-Dateien kann der ID-Extractor nicht lesen. In Studio als `.rbxmx`/`.rbxlx` speichern.
 

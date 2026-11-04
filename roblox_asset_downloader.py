@@ -89,21 +89,50 @@ def load_cookie():
     return cookie.removeprefix(".ROBLOSECURITY=")
 
 
+def get_json(url):
+    """GET mit kurzer Wartezeit bei Rate-Limit (429). Gibt None bei Fehler."""
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code != 429:
+                return None
+            time.sleep(2 ** attempt)
+        except Exception:
+            return None
+    return None
+
+
+def games_of(kind, owner_id):
+    """Root-Place-IDs aller Spiele einer Gruppe oder eines Users. Gruppen: accessFilter=1 liefert auch
+    private Test-Places. Der User-Endpoint kennt nur 2 (öffentlich), 1 gibt HTTP 501."""
+    access = 1 if kind == "groups" else 2
+    d = get_json(f"https://games.roblox.com/v2/{kind}/{owner_id}/games?accessFilter={access}&limit=50&sortOrder=Desc")
+    return [g["rootPlace"]["id"] for g in (d or {}).get("data", []) if g.get("rootPlace")]
+
+
 def creator_places(asset_id):
-    """Place-IDs der Spiele des Asset-Erstellers (Gruppe oder User), höchstens 5."""
-    try:
-        with urllib.request.urlopen(f"https://economy.roblox.com/v2/assets/{asset_id}/details", timeout=10) as r:
-            creator = json.load(r)["Creator"]
-        kind = "groups" if creator["CreatorType"] == "Group" else "users"
-        url = f"https://games.roblox.com/v2/{kind}/{creator['CreatorTargetId']}/games?accessFilter=2&limit=10"
-        with urllib.request.urlopen(url, timeout=10) as r:
-            return [g["rootPlace"]["id"] for g in json.load(r)["data"]][:5]
-    except Exception:
+    """Place-IDs, in deren Kontext Roblox ein gesperrtes Asset herausgeben könnte: Spiele des Erstellers.
+    Gehört das Asset einem User, auch die Spiele der Gruppen, die er besitzt (oft liegt das Spiel dort)."""
+    d = get_json(f"https://economy.roblox.com/v2/assets/{asset_id}/details")
+    creator = (d or {}).get("Creator") or {}
+    owner = creator.get("CreatorTargetId")
+    if not owner:
         return []
+    if creator.get("CreatorType") == "Group":
+        return games_of("groups", owner)[:25]
+    places = games_of("users", owner)
+    roles = get_json(f"https://groups.roblox.com/v2/users/{owner}/groups/roles") or {}
+    for entry in roles.get("data", []):
+        if entry.get("role", {}).get("rank") == 255:  # 255 = Besitzer der Gruppe
+            places += games_of("groups", entry["group"]["id"])
+    return list(dict.fromkeys(places))[:25]
 
 
 PLACES_FILE = Path(__file__).with_name("places.txt")
 NOT_APPROVED = "Von Roblox nicht freigegeben (moderiert)"
+PRIVATE_AUDIO = "Privates Audio"
 
 
 def load_places():
@@ -149,7 +178,13 @@ def fetch(asset_id, cookie, place_id=None):
                 if not retry_error:
                     remember_place(place)
                     return data, None
-        if place_id is None and not KNOWN_PLACES:
+        details = get_json(f"https://economy.roblox.com/v2/assets/{asset_id}/details") or {}
+        if details.get("AssetTypeId") == 3:
+            # Private Audios gibt Roblox auch im Spielkontext nicht heraus, nur dem Besitzer und freigegebenen Spielen.
+            # Fängt bewusst nicht mit "Kein Zugriff" an, sonst bekäme es im Bulk eine sinnlose zweite Runde.
+            return None, (f"{PRIVATE_AUDIO} (Ersteller: {(details.get('Creator') or {}).get('Name', '?')}). "
+                          "Roblox gibt es nur dem Besitzer oder Spielen, die er freigegeben hat.")
+        if place_id is None:
             error += ". Tipp: Link des Spiels angeben, aus dem die ID stammt."
     return data, error
 
