@@ -11,6 +11,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 import sys
 import threading
@@ -562,14 +563,37 @@ $("bulk").onsubmit = e => {
 </body></html>"""
 
 
+def install_plugin():
+    """Kopiert das Studio-Plugin aus dem Repo in Studios Plugin-Ordner, wenn es dort fehlt oder veraltet ist.
+    So reicht nach einem git pull ein Neustart von start.bat, plugin-installieren.bat muss niemand mehr klicken."""
+    source = Path(__file__).with_name("studio-plugin") / "AssetDownloader.lua"
+    roots = [Path(p) / "Roblox" for p in [os.environ.get("LOCALAPPDATA")] if p] + [Path.home() / "Documents" / "Roblox"]
+    for root in roots:
+        if not root.is_dir():
+            continue
+        target = root / "Plugins" / "AssetDownloader.lua"
+        new = source.read_bytes()
+        if target.is_file() and target.read_bytes() == new:
+            return
+        target.parent.mkdir(exist_ok=True)
+        target.write_bytes(new)
+        print(f"Studio-Plugin aktualisiert ({target}). Roblox Studio neu starten, damit es geladen wird.")
+        return
+
+
 if __name__ == "__main__":
+    try:
+        install_plugin()
+    except OSError as e:
+        print(f"Plugin konnte nicht installiert werden: {e}")
     # Windows erlaubt sonst einen zweiten Server auf demselben Port, der Anfragen abfängt.
     ThreadingHTTPServer.allow_reuse_address = False
     try:
         server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     except OSError:
         webbrowser.open(f"http://127.0.0.1:{PORT}")
-        raise SystemExit("Läuft schon in einem anderen Fenster. Browser wurde geöffnet.")
+        raise SystemExit("Läuft schon in einem anderen Fenster. Browser wurde geöffnet.\n"
+                         "Nach einem Update das alte Fenster schließen und start.bat neu öffnen, sonst läuft die alte Version.")
     url = f"http://127.0.0.1:{PORT}"
     print(f"Roblox Asset Downloader läuft auf {url}  (Strg+C beendet)")
     if "--no-browser" not in sys.argv:  # z. B. beim Neustart nur fürs Studio-Plugin

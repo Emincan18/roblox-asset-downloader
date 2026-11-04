@@ -43,6 +43,7 @@ Fenster direkt in Studio mit mehreren Tabs. Neben jedem Knopf erklärt ein **i**
 
 1. `plugin-installieren.bat` doppelklicken und Studio neu starten.
 2. `start.bat` starten. Das Plugin redet mit diesem lokalen Server, er muss laufen.
+   Nach einem `git pull`: altes `start.bat`-Fenster schließen, `start.bat` neu öffnen und Studio neu starten. Der Server kopiert dabei das neue Plugin selbst in Studios Plugin-Ordner.
 3. In Studio: Tab **Plugins** → **Asset Downloader**. Beim ersten Laden fragt Studio, ob das Plugin `127.0.0.1` erreichen darf: **Allow**.
 
 **Laden**
