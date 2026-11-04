@@ -73,6 +73,8 @@ Fenster direkt in Studio mit mehreren Tabs. Neben jedem Knopf erklärt ein **i**
 - **Beim Play-Test** merkt sich die angeklickte Cutscene. Jeder Play-Test spielt sie dann einmal ab, sobald deine Figur da ist.
 - Nicht nachgebaut werden Effekte, die der Code zu bestimmten Zeitpunkten auslöst (Partikel-Bursts, Sounds, Bildschirm-Effekte).
 
+**Variablennamen aufräumen** (Tab Credits): Dekompilierter Code nummeriert Variablen durch (`v12`, `u28`, `p51`, `Vector2_new_ret`). Der Knopf gibt ihnen Namen aus dem Code (`local v5 = script.Cam:Clone()` wird `camClone`, Klassen-Tabellen bekommen den Script-Namen, Methoden-Parameter heißen `self`). Strings, Kommentare und Felder bleiben unangetastet. Scripts, die danach nicht mehr kompilieren würden, bleiben, wie sie waren. Ausgewählte Scripts oder die ganze Place, Strg+Z macht es rückgängig.
+
 #### Hochladen unter deinem Namen einrichten (einmalig)
 
 **Reparieren und sichern** und **Unter meinem Namen hochladen** laden Texturen in deinen eigenen Account hoch. Roblox Studio darf das selbst noch nicht, deshalb macht es der Server über die offizielle Open Cloud API. Dafür braucht er einen API-Key von dem Account, unter dessen Namen die Bilder erscheinen sollen.

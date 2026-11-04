@@ -823,6 +823,360 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			creditsLabel.TextColor3, creditsLabel.Text = BAD, "Fehler: " .. tostring(r)
 		end
 	end)
+
+	-- Variablennamen aufräumen ----------------------------------------------------------------
+	-- Decompiler kennen die echten Namen nicht und nummerieren: v12, u28, p51, os_clock_ret. Der Knopf leitet
+	-- aus dem Code einen lesbaren Namen ab (local v5 = script.Cam:Clone() -> camClone) und ersetzt nur echte
+	-- Code-Stellen: keine Strings, keine Kommentare, keine Felder wie obj.v1. Ein neuer Name kommt nie vor, wenn es
+	-- ihn im Script schon gibt.
+	do
+		card("Variablennamen aufräumen", "Macht dekompilierten Code lesbar: v12, u28, p51 bekommen Namen aus dem Code.")
+		local renameBtn = button("Variablennamen aufräumen", PURPLE, "Dekompilierter Code nummeriert Variablen durch (v1, u28, p51, Vector2_new_ret). Dieser Knopf gibt ihnen Namen, die aus dem Code folgen:\n\nlocal v5 = script.Cam:Clone() wird camClone\nlocal u3 = game:GetService(\"Players\") wird Players\nlocal v9 = Instance.new(\"Part\") wird part\nRenderStepped:Connect(function(p51) wird dt, PlayerAdded wird player, InputBegan wird input, gameProcessed\n\nWo sich kein Name ableiten lässt, bleibt der alte. Strings, Kommentare und Felder (obj.v1) bleiben unangetastet, und ein neuer Name wird nie gewählt, wenn er im Script schon vorkommt. Kompiliert ein Script danach nicht mehr, bleibt es, wie es war.\n\nSind im Explorer Scripts oder Ordner ausgewählt, nur diese, sonst die ganze Place. Zum Bestätigen zweimal klicken. Strg+Z macht alles rückgängig.")
+		local renameLabel = label("")
+
+		local KEYWORDS = {}
+		for _, k in { "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local", "nil",
+			"not", "or", "repeat", "return", "then", "true", "until", "while", "continue", "export", "type", "self" } do
+			KEYWORDS[k] = true
+		end
+		-- Parameter von Events, deren Bedeutung feststeht.
+		local EVENT_PARAMS = {
+			RenderStepped = { "dt" }, Heartbeat = { "dt" }, Stepped = { "time", "dt" }, PreRender = { "dt" }, PreSimulation = { "dt" },
+			PlayerAdded = { "player" }, PlayerRemoving = { "player" }, CharacterAdded = { "character" },
+			CharacterRemoving = { "character" }, CharacterAppearanceLoaded = { "character" },
+			Touched = { "hit" }, TouchEnded = { "hit" }, OnServerEvent = { "player" }, Triggered = { "player" },
+			MouseClick = { "player" }, Chatted = { "message" }, FocusLost = { "enterPressed" },
+			InputBegan = { "input", "gameProcessed" }, InputEnded = { "input", "gameProcessed" }, InputChanged = { "input", "gameProcessed" },
+			ChildAdded = { "child" }, ChildRemoved = { "child" }, DescendantAdded = { "descendant" },
+			DescendantRemoving = { "descendant" }, Changed = { "property" }, KeyframeReached = { "keyframeName" },
+			HealthChanged = { "health" }, StateChanged = { "oldState", "newState" }, Running = { "speed" },
+		}
+
+		local function isDecompName(n)
+			return n:match("^[vup]%d+$") ~= nil or n:match("^[%a][%w]*_[%w_]*ret%d*$") ~= nil
+		end
+
+		local function lowerFirst(s) return s:sub(1, 1):lower() .. s:sub(2) end
+		local function ident(s)
+			s = (s or ""):gsub("[^%w_]", "")
+			if s == "" then return nil end
+			if s:match("^%d") then s = "n" .. s end
+			return s
+		end
+
+		-- Name aus der rechten Seite von local x = <rhs>. nil, wenn nichts Sinnvolles folgt.
+		local function nameFromRhs(rhs)
+			rhs = rhs:gsub(";%s*$", ""):gsub("%s+$", ""):gsub("%s+or%s+nil$", "")
+			if rhs == "nil" or isDecompName(rhs) then return nil end
+			if rhs == "..." then return "args" end
+			if rhs:match("^#") then return "count" end
+			if rhs:match("^not ") or rhs:find(" and true or false$") or rhs:match("^[%w_%.]+%s*[=~<>]=") then return "flag" end
+			local svc = rhs:match('^game:GetService%("([%w_]+)"%)$')
+			if svc then return svc end
+			if rhs:match("^require%(") then
+				return ident(rhs:match('"([^"]+)"%)%)?$') or rhs:match("([%w_]+)%)$"))
+			end
+			local class = rhs:match('^Instance%.new%("([%w_]+)"')
+			if class then return lowerFirst(class) end
+			if rhs:find(":LoadAnimation%(") then return "track" end
+			if rhs:match("^setmetatable%(") then return "object" end
+			local cloned = rhs:match("([%w_]+)%)?:Clone%(%)$") or rhs:match('"([^"]+)"%):Clone%(%)$')
+			if cloned then return lowerFirst(ident(cloned) or "object") .. "Clone" end
+			if rhs == "os.clock()" or rhs == "tick()" or rhs == "time()" then return "startTime" end
+			if rhs == "true" or rhs == "false" then return "flag" end
+			if rhs:match("^%-?%d") then return "value" end
+			if rhs:match('^"') or rhs:match("^'") then return "text" end
+			if rhs:match("^{") then return "list" end
+			local child = rhs:match(':WaitForChild%("([^"]+)"[^)]*%)$') or rhs:match(':FindFirstChild%("([^"]+)"[^)]*%)$')
+			if child then return ident(lowerFirst(child)) end
+			local ctor = rhs:match("^([%u][%w]*)%.new%(")
+			if ctor then
+				-- Vector2 -> vector, CFrame -> cframe, UDim2 -> udim (Ziffern stören, wenn ein Zähler drankommt)
+				ctor = ctor:gsub("%d+$", "")
+				return ctor:match("^%u%u") and ctor:lower() or lowerFirst(ctor)
+			end
+			local chain = rhs:match("^[%a_][%w_]*[%.%w_]*%.([%a_][%w_]*)$")
+			if chain then return lowerFirst(chain) end
+			if rhs:match("^[%a_][%w_]*$") and not KEYWORDS[rhs] then return lowerFirst(rhs) end -- local v5 = LocalPlayer
+			local call = rhs:match("^([%a_][%w_]*)%(")
+			if call and not ({ tostring = 1, tonumber = 1, pcall = 1, unpack = 1, select = 1, type = 1, typeof = 1 })[call] then
+				call = call:gsub("^[Gg]et", ""):gsub("^[Cc]reate", ""):gsub("^[Mm]ake", ""):gsub("^[Bb]uild", "")
+				if call ~= "" then return ident(lowerFirst(call)) end
+			end
+			if call == "tostring" then return "text" end
+			if call == "tonumber" then return "number" end
+			local method = rhs:match(":([%a_][%w_]*)%([^()]*%)$")
+			if method then
+				method = method:gsub("^GetPlayerFrom", ""):gsub("^FindFirst", ""):gsub("^Get", ""):gsub("^Find", "")
+				if method ~= "" then return ident(lowerFirst(method)) end
+			end
+			return nil
+		end
+
+		-- Lua/Luau zerlegen: { art, text }, art = "n" Name, "s" String, "c" Kommentar, "o" alles andere.
+		local function lex(src)
+			local toks, i, n = {}, 1, #src
+			local function push(kind, text) toks[#toks + 1] = { kind, text } end
+			local function skipQuoted(k, q) -- gibt Index des schließenden Zeichens
+				k += 1
+				while k <= n do
+					local d = src:sub(k, k)
+					if d == "\\" then k += 2 elseif d == q or d == "\n" then return k else k += 1 end
+				end
+				return n
+			end
+			while i <= n do
+				local c = src:sub(i, i)
+				if c == "-" and src:sub(i + 1, i + 1) == "-" then
+					local eq = src:match("^%[(=*)%[", i + 2)
+					local j
+					if eq then
+						local _, e = src:find("]" .. eq .. "]", i + 4 + #eq, true)
+						j = e or n
+					else
+						j = (src:find("\n", i, true) or n + 1) - 1
+					end
+					push("c", src:sub(i, j))
+					i = j + 1
+				elseif c == "[" and src:match("^%[=*%[", i) then
+					local eq = src:match("^%[(=*)%[", i)
+					local _, e = src:find("]" .. eq .. "]", i + 2 + #eq, true)
+					local j = e or n
+					push("s", src:sub(i, j))
+					i = j + 1
+				elseif c == '"' or c == "'" then
+					local j = skipQuoted(i, c)
+					push("s", src:sub(i, j))
+					i = j + 1
+				elseif c == "`" then
+					-- Interpolierter String: Text bleibt String, Code in { } wird mit zerlegt.
+					local start, k = i, i + 1
+					while k <= n do
+						local d = src:sub(k, k)
+						if d == "\\" then
+							k += 2
+						elseif d == "`" then
+							break
+						elseif d == "{" then
+							push("s", src:sub(start, k))
+							local depth, m = 1, k + 1
+							while m <= n do
+								local e = src:sub(m, m)
+								if e == '"' or e == "'" then
+									m = skipQuoted(m, e)
+								elseif e == "{" then
+									depth += 1
+								elseif e == "}" then
+									depth -= 1
+									if depth == 0 then break end
+								end
+								m += 1
+							end
+							for _, t in lex(src:sub(k + 1, m - 1)) do toks[#toks + 1] = t end
+							start, k = m, m + 1
+						else
+							k += 1
+						end
+					end
+					push("s", src:sub(start, math.min(k, n)))
+					i = k + 1
+				elseif c:match("[%a_]") then
+					local word = src:match("^[%a_][%w_]*", i)
+					push("n", word)
+					i += #word
+				elseif c:match("%d") or (c == "." and src:sub(i + 1, i + 1):match("%d")) then
+					local num = src:match("^%.?%d[%w_%.]*", i)
+					push("o", num)
+					i += #num
+				else
+					push("o", c)
+					i += 1
+				end
+			end
+			return toks
+		end
+
+		-- Gibt neuen Code und Zahl der umbenannten Variablen. scriptName: Name für die Klassen-Tabelle des Moduls.
+		local function renameSource(src, scriptName)
+			local toks = lex(src)
+			local used, targets, order = {}, {}, {}
+			local function prevSignificant(k)
+				k -= 1
+				while k > 0 and toks[k][1] == "o" and toks[k][2]:match("^%s+$") do k -= 1 end
+				return k
+			end
+			for k, t in toks do
+				if t[1] == "n" then
+					used[t[2]] = true
+					-- Feld (obj.v1, obj:v1) ist kein Variablenname; ".." (Verkettung) schon.
+					local p = prevSignificant(k)
+					local isField = p > 0 and (toks[p][2] == ":" or (toks[p][2] == "." and not (p > 1 and toks[p - 1][2] == ".")))
+					t.field = isField
+					if not isField and isDecompName(t[2]) and not targets[t[2]] then
+						targets[t[2]] = true
+						table.insert(order, t[2]) -- Reihenfolge im Code, damit Zähler (vector, vector2 …) von oben nach unten laufen
+					end
+				end
+			end
+			if next(targets) == nil then return src, 0 end
+			-- Namen ableiten: aus local x = …, sonst aus Event-Parametern.
+			local wanted = {}
+			for name in targets do
+				local rhs = src:match("local%s+" .. name .. "%s*=%s*([^\n]+)")
+				if rhs and rhs:match("^{%s*};?%s*$") and scriptName and src:find(name .. ".__index = " .. name, 1, true) then
+					wanted[name] = ident(scriptName) -- local u2 = {}; u2.__index = u2 ist die Klasse des Moduls
+				else
+					wanted[name] = rhs and nameFromRhs(rhs)
+				end
+				if not wanted[name] then
+					local later = src:match("\n[ \t]*" .. name .. "[ \t]*=[ \t]*([^=\n][^\n]*)")
+					wanted[name] = later and nameFromRhs(later)
+				end
+			end
+			-- Rumpf jeder function Tabelle.Methode(pN …) über Block-Tiefe finden (function/if/do/repeat öffnen, end/until schließen).
+			local selfParams = {}
+			for k, t in toks do
+				if t[1] == "n" and t[2] == "function" and not t.field then
+					local m, sawDot, first = k + 1, false, nil
+					while m <= #toks and toks[m][2] ~= "(" do
+						if toks[m][2] == "." then sawDot = true end
+						m += 1
+					end
+					local q = m + 1
+					while q <= #toks and toks[q][1] == "o" and toks[q][2]:match("^%s+$") do q += 1 end
+					first = toks[q] and toks[q][1] == "n" and toks[q][2]
+					if sawDot and first and first:match("^p%d+$") then
+						local depth, e, hasSelf = 0, k, false
+						while e <= #toks do
+							local w = toks[e]
+							if w[1] == "n" and not w.field then
+								if w[2] == "function" or w[2] == "if" or w[2] == "do" or w[2] == "repeat" then
+									depth += 1
+								elseif w[2] == "end" or w[2] == "until" then
+									depth -= 1
+									if depth == 0 then break end
+								elseif w[2] == "self" then
+									hasSelf = true
+								end
+							end
+							e += 1
+						end
+						if not hasSelf then selfParams[first] = true end
+					end
+				end
+			end
+			for event, params in src:gmatch("%.([%a_][%w_]*):Connect%(function%(([^%)]*)%)") do
+				local names = EVENT_PARAMS[event]
+				if names then
+					local index = 0
+					for param in params:gmatch("[^,%s]+") do
+						index += 1
+						if targets[param] and not wanted[param] and names[index] then wanted[param] = names[index] end
+					end
+				end
+			end
+			local map, count = {}, 0
+			for _, name in order do
+				if selfParams[name] and not wanted[name] then
+					-- pN kommt nur in seiner eigenen Methode vor, und dort gibt es kein anderes self.
+					map[name] = "self"
+					count += 1
+					continue
+				end
+				local base = wanted[name]
+				if base and not KEYWORDS[base] then
+					local candidate, suffix = base, 1
+					while used[candidate] or KEYWORDS[candidate] do
+						suffix += 1
+						candidate = base .. suffix
+					end
+					used[candidate] = true
+					map[name] = candidate
+					count += 1
+				end
+			end
+			if count == 0 then return src, 0 end
+			local out = table.create(#toks)
+			for k, t in toks do
+				out[k] = (t[1] == "n" and not t.field and map[t[2]]) or t[2]
+			end
+			return table.concat(out), count
+		end
+
+		local function renameScripts()
+			local list, sel = {}, Selection:Get()
+			local roots = #sel > 0 and sel or { game }
+			for _, root in roots do
+				local ok, all = pcall(function()
+					local d = root == game and {} or root:GetDescendants()
+					if root == game then
+						for _, svc in game:GetChildren() do
+							local okSvc, sub = pcall(function() return svc.ClassName ~= "CoreGui" and svc:GetDescendants() or {} end)
+							if okSvc then table.move(sub, 1, #sub, #d + 1, d) end
+						end
+					else
+						table.insert(d, 1, root)
+					end
+					return d
+				end)
+				for _, obj in ok and all or {} do
+					if obj:IsA("LuaSourceContainer") then table.insert(list, obj) end
+				end
+			end
+			local r = { scripts = 0, names = 0, skipped = 0, seen = #list }
+			for i, s in list do
+				if i % 10 == 0 then
+					renameBtn.Text = ("Benenne um %d%% (%d/%d) …"):format(math.floor(i / #list * 100), i, #list)
+					task.wait()
+				end
+				pcall(function()
+					local src = s.Source
+					local renamed, count = renameSource(src, s.Name)
+					if count == 0 then return end
+					-- Sicherheitsnetz wie bei Credits: kompilierte der Code vorher und danach nicht mehr, bleibt er.
+					local okBefore, before = pcall(loadstring, src)
+					local okAfter, after = pcall(loadstring, renamed)
+					if okBefore and before and not (okAfter and after) then
+						r.skipped += 1
+						return
+					end
+					game:GetService("ScriptEditorService"):UpdateSourceAsync(s, function() return renamed end)
+					r.scripts += 1
+					r.names += count
+				end)
+			end
+			return r
+		end
+
+		local confirmUntil = 0
+		renameBtn.Activated:Connect(function()
+			if RunService:IsRunning() then
+				renameLabel.TextColor3, renameLabel.Text = BAD, "Erst den Play-Test beenden."
+				return
+			end
+			if not renameBtn.Active then return end
+			if os.clock() > confirmUntil then
+				confirmUntil = os.clock() + 5
+				local sel = #Selection:Get() > 0
+				renameBtn.Text = sel and "Sicher? Nur Auswahl, nochmal" or "Sicher? Ganze Place, nochmal"
+				task.delay(5, function() if renameBtn.Active then renameBtn.Text = "Variablennamen aufräumen" end end)
+				return
+			end
+			confirmUntil = 0
+			renameBtn.Active = false
+			local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: Variablennamen aufräumen")
+			local ok, r = pcall(renameScripts)
+			if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+			renameBtn.Active, renameBtn.Text = true, "Variablennamen aufräumen"
+			if ok then
+				renameLabel.TextColor3 = OK
+				renameLabel.Text = ("%d Variablen in %d von %d Scripts umbenannt.%s Strg+Z macht es rückgängig.")
+					:format(r.names, r.scripts, r.seen, r.skipped > 0 and (" %d Scripts nicht angefasst, sie wären sonst kaputt gegangen."):format(r.skipped) or "")
+			else
+				renameLabel.TextColor3, renameLabel.Text = BAD, "Fehler: " .. tostring(r)
+			end
+		end)
+	end
 end
 
 showTab("Laden")
