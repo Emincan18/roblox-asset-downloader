@@ -981,7 +981,35 @@ local function playSelection(outLabel)
 			end
 		end
 	end
-	if parts:FindFirstChildWhichIsA("BasePart", true) then parts:PivotTo(cf) end
+	if parts:FindFirstChildWhichIsA("BasePart", true) then
+		parts:PivotTo(cf)
+		-- Liegen die Effekte weit auseinander (CursedEnergy: Arm und Trail fast 1000 Studs), landete nur die Mitte
+		-- vor der Kamera und jeder Effekt außerhalb des Bildes. Dann jeden einzeln nebeneinander vor die Kamera.
+		local units = {}
+		local function collect(o)
+			if o:IsA("BasePart") or o:IsA("Model") then
+				table.insert(units, o)
+			elseif o:IsA("Folder") then
+				for _, c in o:GetChildren() do collect(c) end
+			end
+		end
+		for _, c in parts:GetChildren() do collect(c) end
+		if #units > 1 and select(2, parts:GetBoundingBox()).Magnitude > 30 then
+			for i, u in units do
+				local target = cf * CFrame.new((i - (#units + 1) / 2) * 4, 0, 0)
+				if u:IsA("Model") then
+					u:PivotTo(target * u:GetPivot().Rotation)
+				else
+					local move = target * u.CFrame.Rotation * u.CFrame:Inverse()
+					local list = u:GetDescendants()
+					table.insert(list, 1, u)
+					for _, q in list do
+						if q:IsA("BasePart") then q.CFrame = move * q.CFrame end
+					end
+				end
+			end
+		end
+	end
 	parts.Parent, holder.Parent = preview, preview
 	preview.Parent = workspace
 	local n = emitIn({ preview })
