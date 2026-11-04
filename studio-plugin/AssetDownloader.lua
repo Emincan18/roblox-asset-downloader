@@ -626,6 +626,23 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 		return result, count
 	end
 
+	-- Ersteller-Tags in Instanznamen und Animations-Markern ("MiH Cam by X", "Camera - by @X", "Keyframe (made by X)").
+	-- Namen sind kein Spieltext, darum lockerer als CREDIT_SENTENCE: alles ab dem Tag geht, ohne Rest heißt die Instanz wie ihre Klasse.
+	local function stripTag(text)
+		local low, first = text:lower(), nil
+		-- "Credits" fehlt mit Absicht: als Name ist das oft Spielwährung (leaderstats). "Lobby:" trifft dank %f nicht.
+		-- () markiert, wo geschnitten wird: "MiH Cam by X" behält "MiH Cam".
+		for _, m in { "made%s*by%f[%A]", "created%s*by%f[%A]", "animated%s*by%f[%A]", "%f[%a]anim%a*%s+()by%f[%A]",
+			"%f[%a]cam%a*%s+()by%f[%A]", "cutscene%s+()by%f[%A]", "scripted%s*by%f[%A]", "coded%s*by%f[%A]", "edited%s*by%f[%A]",
+			"%f[%a]v?fx%s+()by%f[%A]", "%f[%a]by%s*[@:]", "^%s*by%s", "[%-|%(%[]%s*by%s", "_by_%w", "discord", "t%.me/", "guilded%.gg/" } do
+			local s, _, cut = low:find(m)
+			local p = cut or s
+			if p and (not first or p < first) then first = p end
+		end
+		if not first then return text, false end
+		return (text:sub(1, first - 1):gsub("[%s|%-,:;%(%[_]+$", "")), true
+	end
+
 	local function stripLinks(text)
 		local count = 0
 		for _, p in LINKS do
@@ -727,6 +744,32 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			local ok, list = pcall(function() return svc.ClassName ~= "CoreGui" and svc:GetDescendants() or {} end)
 			if ok then table.move(list, 1, #list, #all + 1, all) end
 		end
+		-- Erst die Namen: Scripts greifen oft per ["camera by kitsun2"] darauf zu, darum gehen die neuen Namen
+		-- unten auch in jeden String im Code. Gleicher alter Name gibt überall denselben neuen, Geschwister bleiben eindeutig.
+		local renamed, newName = {}, {}
+		for count, obj in all do
+			if count % 2000 == 0 then task.wait() end
+			pcall(function()
+				local old = obj.Name
+				local name, hit = stripTag((stripLinks(old)))
+				if not (hit or matchesAny(old, TEXT_MARKERS)) then return end
+				if not newName[old] then
+					local base = (name:find("%S") and not matchesAny(name, TEXT_MARKERS)) and name or obj.ClassName
+					local pick, n = base, 1
+					while obj.Parent and obj.Parent:FindFirstChild(pick) do n += 1 pick = base .. n end
+					newName[old] = pick
+				end
+				obj.Name = newName[old]
+				renamed[obj] = true
+			end)
+		end
+		local function renameInCode(src)
+			for old, new in newName do
+				local pat, rep = old:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0"), new:gsub("%%", "%%%%")
+				src = src:gsub('"' .. pat .. '"', '"' .. rep .. '"'):gsub("'" .. pat .. "'", "'" .. rep .. "'")
+			end
+			return src
+		end
 		for count, obj in all do
 			if count % 500 == 0 then task.wait() end
 			pcall(function()
@@ -740,6 +783,7 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 				if obj:IsA("LuaSourceContainer") then
 					local src = obj.Source
 					local cleaned, comments, links, credits = cleanSource(src)
+					if next(newName) then cleaned = renameInCode(cleaned) end
 					if isCreditName and not cleaned:find("%S") then
 						table.insert(doomed, obj)
 						return
@@ -774,11 +818,11 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					local text, k = stripCredits(obj.Text)
 					if k > 0 then obj.Text, changed, r.credits = text, true, r.credits + k end
 				end
-				if matchesAny(obj.Name, TEXT_MARKERS) then
-					local name = stripLinks(obj.Name)
-					obj.Name = (name:find("%S") and not matchesAny(name, TEXT_MARKERS)) and name or obj.ClassName
-					changed = true
+				if obj:IsA("KeyframeMarker") then
+					local value, hit = stripTag(obj.Value)
+					if hit then obj.Value, changed = value, true end
 				end
+				if renamed[obj] then changed = true end
 				for key, value in obj:GetAttributes() do
 					if CREDIT_NAMES[plainName(key)] or (type(value) == "string" and matchesAny(value, TEXT_MARKERS)) then
 						obj:SetAttribute(key, nil)
