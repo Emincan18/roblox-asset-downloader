@@ -19,18 +19,19 @@ local SERVER = "http://127.0.0.1:8765"
 -- Webseiten können diesen Header nicht mitschicken, so nimmt der Server nur Anfragen vom Plugin an.
 local PLUGIN_HEADERS = { ["X-Asset-Downloader"] = "plugin" }
 
--- Farben wie iOS im Dunkelmodus: schwarzer Grund, gestufte Grautöne, genau ein Akzent.
+-- Farben wie das Stealmaxxing-Logo: schwarzer Grund, dunkle Flächen mit einem Hauch Rot, genau ein roter Akzent.
 local BG = Color3.fromRGB(0, 0, 0)
-local CARD = Color3.fromRGB(28, 28, 30) -- #1C1C1E
-local FIELD = Color3.fromRGB(44, 44, 46) -- #2C2C2E, Felder und Listenzeilen in Karten
-local LINE = Color3.fromRGB(56, 56, 58) -- #38383A, Trennlinien
+local CARD = Color3.fromRGB(26, 20, 21) -- #1A1415
+local FIELD = Color3.fromRGB(43, 32, 34) -- #2B2022, Felder und Listenzeilen in Karten
+local LINE = Color3.fromRGB(64, 40, 43) -- #40282B, Trennlinien
 local TEXT = Color3.fromRGB(255, 255, 255)
-local MUTED = Color3.fromRGB(152, 152, 159) -- #98989F, 6,3:1 auf CARD
-local ACCENT = Color3.fromRGB(10, 132, 255) -- #0A84FF, nur Hauptaktion und Auswahl
-local GREY = Color3.fromRGB(58, 58, 60) -- #3A3A3C, Nebenaktionen
--- Früher eigene Farben je Knopf. Jetzt sind alle Nebenaktionen grau, damit Blau eine Bedeutung behält.
+local MUTED = Color3.fromRGB(176, 158, 160) -- #B09EA0, gut lesbar auf CARD
+local ACCENT = Color3.fromRGB(226, 27, 38) -- #E21B26, Rot aus dem Logo, nur Hauptaktion und Auswahl
+local GREY = Color3.fromRGB(62, 46, 48) -- #3E2E30, Nebenaktionen
+-- Früher eigene Farben je Knopf. Jetzt sind alle Nebenaktionen gleich, damit Rot eine Bedeutung behält.
 local BLUE, GREEN, PURPLE = GREY, GREY, GREY
-local BAD = Color3.fromRGB(255, 69, 58) -- #FF453A
+-- Fehler in Orange: Rot ist schon der Akzent, sonst sähe jede Hauptaktion wie ein Fehler aus.
+local BAD = Color3.fromRGB(255, 159, 10) -- #FF9F0A
 local OK = Color3.fromRGB(48, 209, 88) -- #30D158
 local FONT = {
 	regular = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Regular),
@@ -245,34 +246,34 @@ end
 -- Kopf -------------------------------------------------------------------------------------
 
 do
-	local head = add(Instance.new("Frame"))
-	head.Size, head.BackgroundTransparency = UDim2.new(1, 0, 0, 44), 1
-	-- Logo: App-Icon mit drei steigenden Balken, der höchste in Akzentblau. Steht für "maxxing".
-	local icon = Instance.new("Frame")
-	icon.Size, icon.BackgroundColor3 = UDim2.fromOffset(42, 42), Color3.new(1, 1, 1)
-	corner(icon, 10)
-	local sheen = Instance.new("UIGradient", icon) -- dezentes Material wie bei iOS-Icons, oben etwas heller
-	sheen.Rotation, sheen.Color = 90, ColorSequence.new(Color3.fromRGB(64, 64, 68), Color3.fromRGB(30, 30, 32))
-	icon.Parent = head
-	for i, h in { 10, 17, 24 } do
-		local bar = Instance.new("Frame")
-		bar.AnchorPoint = Vector2.new(0, 1)
-		bar.Size, bar.Position = UDim2.fromOffset(6, h), UDim2.fromOffset(8 + (i - 1) * 10, 33)
-		bar.BackgroundColor3 = i == 3 and ACCENT or Color3.fromRGB(235, 235, 245)
-		bar.BorderSizePixel = 0
-		corner(bar, 3)
-		bar.Parent = icon
-	end
-	local title = Instance.new("TextLabel")
-	title.Size, title.Position, title.BackgroundTransparency = UDim2.new(1, -54, 0, 24), UDim2.fromOffset(54, 1), 1
-	title.FontFace, title.TextSize, title.TextColor3 = FONT.heavy, 22, TEXT
-	title.TextXAlignment, title.Text = Enum.TextXAlignment.Left, "Stealmaxxing"
-	title.Parent = head
-	local sub = Instance.new("TextLabel")
-	sub.Size, sub.Position, sub.BackgroundTransparency = UDim2.new(1, -54, 0, 16), UDim2.fromOffset(54, 25), 1
-	sub.FontFace, sub.TextSize, sub.TextColor3 = FONT.regular, 13, MUTED
-	sub.TextXAlignment, sub.Text = Enum.TextXAlignment.Left, "Asset-Toolkit für Roblox Studio"
-	sub.Parent = head
+	-- Logo über die ganze Breite. Die Pixel kommen vom lokalen Server (studio-plugin/logo.png) und werden in ein
+	-- EditableImage gezeichnet: So muss das Bild nicht zu Roblox hochgeladen und moderiert werden.
+	local head = add(Instance.new("ImageLabel"))
+	head.Name, head.BackgroundTransparency = "Logo", 1
+	head.Size, head.ScaleType = UDim2.new(1, 0, 0, 150), Enum.ScaleType.Fit
+	local ratio = Instance.new("UIAspectRatioConstraint", head)
+	ratio.AspectRatio, ratio.DominantAxis = 760 / 348, Enum.DominantAxis.Width
+	-- Solange das Logo lädt oder der Server nicht läuft: Name in Rot.
+	local fallback = Instance.new("TextLabel")
+	fallback.Size, fallback.BackgroundTransparency = UDim2.fromScale(1, 1), 1
+	fallback.FontFace, fallback.TextSize, fallback.TextColor3 = FONT.heavy, 30, ACCENT
+	fallback.Text = "STEALMAXXING"
+	fallback.Parent = head
+	task.spawn(function()
+		local ok, res = pcall(HttpService.RequestAsync, HttpService,
+			{ Url = SERVER .. "/api/plugin-logo", Headers = PLUGIN_HEADERS, Method = "GET" })
+		if not (ok and res.Success) then return end
+		local size = {}
+		for k, v in res.Headers do size[k:lower()] = tonumber(v) end
+		local w, h = size["x-width"], size["x-height"]
+		if not (w and h and #res.Body == w * h * 4) then return end
+		local okImg, img = pcall(AssetService.CreateEditableImage, AssetService, { Size = Vector2.new(w, h) })
+		if not (okImg and img) then return end
+		img:WritePixelsBuffer(Vector2.zero, Vector2.new(w, h), buffer.fromstring(res.Body))
+		ratio.AspectRatio = w / h
+		head.ImageContent = Content.fromObject(img)
+		fallback.Visible = false
+	end)
 end
 
 -- Tabs als Segmented Control wie bei iOS: ein Daumen gleitet unter den gewählten Namen.
@@ -281,7 +282,7 @@ tabBar.Size, tabBar.BackgroundColor3 = UDim2.new(1, 0, 0, 34), CARD
 corner(tabBar, 9)
 do
 	local thumb = Instance.new("Frame")
-	thumb.Name, thumb.BackgroundColor3, thumb.BorderSizePixel = "Thumb", Color3.fromRGB(99, 99, 102), 0
+	thumb.Name, thumb.BackgroundColor3, thumb.BorderSizePixel = "Thumb", Color3.fromRGB(122, 22, 30), 0 -- dunkles Logo-Rot
 	corner(thumb, 7)
 	thumb.Parent = tabBar
 	local track = Instance.new("Frame")
@@ -823,6 +824,448 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			creditsLabel.TextColor3, creditsLabel.Text = BAD, "Fehler: " .. tostring(r)
 		end
 	end)
+
+	-- Variablennamen aufräumen ----------------------------------------------------------------
+	-- Decompiler kennen die echten Namen nicht und nummerieren: v12, u28, p51, os_clock_ret. Der Knopf leitet
+	-- aus dem Code einen lesbaren Namen ab (local v5 = script.Cam:Clone() -> camClone) und ersetzt nur echte
+	-- Code-Stellen: keine Strings, keine Kommentare, keine Felder wie obj.v1. Ein neuer Name kommt nie vor, wenn es
+	-- ihn im Script schon gibt.
+	do
+		card("Variablennamen aufräumen", "Macht dekompilierten Code lesbar: v12, u28, p51 bekommen Namen aus dem Code.")
+		local renameBtn = button("Variablennamen aufräumen", PURPLE, "Dekompilierter Code nummeriert Variablen durch (v1, u28, p51, Vector2_new_ret). Dieser Knopf gibt ihnen Namen, die aus dem Code folgen:\n\nlocal v5 = script.Cam:Clone() wird camClone\nlocal u3 = game:GetService(\"Players\") wird Players\nlocal v9 = Instance.new(\"Part\") wird part\nRenderStepped:Connect(function(p51) wird dt, PlayerAdded wird player, InputBegan wird input, gameProcessed\n\nWo sich kein Name ableiten lässt, bleibt der alte. Strings, Kommentare und Felder (obj.v1) bleiben unangetastet, und ein neuer Name wird nie gewählt, wenn er im Script schon vorkommt. Kompiliert ein Script danach nicht mehr, bleibt es, wie es war.\n\nSind im Explorer Scripts oder Ordner ausgewählt, nur diese, sonst die ganze Place. Zum Bestätigen zweimal klicken. Strg+Z macht alles rückgängig.")
+		local renameLabel = label("")
+
+		local KEYWORDS = {}
+		for _, k in { "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local", "nil",
+			"not", "or", "repeat", "return", "then", "true", "until", "while", "continue", "export", "type", "self" } do
+			KEYWORDS[k] = true
+		end
+		-- Parameter von Events, deren Bedeutung feststeht.
+		local EVENT_PARAMS = {
+			RenderStepped = { "dt" }, Heartbeat = { "dt" }, Stepped = { "time", "dt" }, PreRender = { "dt" }, PreSimulation = { "dt" },
+			PlayerAdded = { "player" }, PlayerRemoving = { "player" }, CharacterAdded = { "character" },
+			CharacterRemoving = { "character" }, CharacterAppearanceLoaded = { "character" },
+			Touched = { "hit" }, TouchEnded = { "hit" }, OnServerEvent = { "player" }, Triggered = { "player" },
+			MouseClick = { "player" }, Chatted = { "message" }, FocusLost = { "enterPressed" },
+			InputBegan = { "input", "gameProcessed" }, InputEnded = { "input", "gameProcessed" }, InputChanged = { "input", "gameProcessed" },
+			ChildAdded = { "child" }, ChildRemoved = { "child" }, DescendantAdded = { "descendant" },
+			DescendantRemoving = { "descendant" }, Changed = { "property" }, KeyframeReached = { "keyframeName" },
+			HealthChanged = { "health" }, StateChanged = { "oldState", "newState" }, Running = { "speed" },
+		}
+
+		-- Was nach "name." oder "name:" kommt, verrät, was die Variable ist. Erste passende Rolle in dieser Reihenfolge.
+		local MEMBER_ROLES = {
+			{ "player", { "Character", "UserId", "Kick", "Backpack", "PlayerGui", "DisplayName", "CharacterAdded" } },
+			{ "character", { "Humanoid", "HumanoidRootPart" } },
+			{ "humanoid", { "Health", "MaxHealth", "TakeDamage", "WalkSpeed", "JumpPower", "Died", "RootPart" } },
+			{ "track", { "TimePosition", "AdjustSpeed", "IsPlaying", "GetMarkerReachedSignal" } },
+			{ "connection", { "Disconnect" } },
+			{ "remote", { "FireServer", "FireClient", "FireAllClients", "InvokeServer", "OnClientEvent", "OnServerEvent" } },
+			{ "input", { "UserInputType", "KeyCode", "UserInputState" } },
+			{ "part", { "Anchored", "CanCollide", "AssemblyLinearVelocity", "Velocity", "BrickColor", "Material" } },
+			{ "vector", { "Magnitude", "Unit" } },
+			{ "signal", { "Connect", "Once" } },
+			{ "label", { "Text", "TextColor3", "TextTransparency" } },
+			{ "gui", { "Visible", "AbsoluteSize", "BackgroundTransparency" } },
+			{ "cframe", { "LookVector", "RightVector", "UpVector", "Inverse", "ToWorldSpace", "ToObjectSpace" } },
+			{ "part", { "CFrame", "Position", "Size", "Orientation" } },
+			{ "instance", { "IsA", "FindFirstChild", "WaitForChild", "GetChildren", "GetDescendants", "Destroy", "Parent",
+				"GetAttribute", "SetAttribute", "Clone", "FindFirstChildOfClass", "FindFirstAncestor", "Name", "ClassName" } },
+		}
+		local MEMBER_TO_ROLE = {}
+		for rank, entry in MEMBER_ROLES do
+			for _, member in entry[2] do
+				if not MEMBER_TO_ROLE[member] then MEMBER_TO_ROLE[member] = { entry[1], rank } end
+			end
+		end
+
+		local function isDecompName(n)
+			return n:match("^[vup]%d+$") ~= nil or n:match("^[%a][%w]*_[%w_]*ret%d*$") ~= nil
+		end
+
+		local function lowerFirst(s) return s:sub(1, 1):lower() .. s:sub(2) end
+		local function ident(s)
+			s = (s or ""):gsub("[^%w_]", "")
+			if s == "" then return nil end
+			if s:match("^%d") then s = "n" .. s end
+			return s
+		end
+
+		-- Name aus der rechten Seite von local x = <rhs>. nil, wenn nichts Sinnvolles folgt.
+		local function nameFromRhs(rhs)
+			rhs = rhs:gsub(";%s*$", ""):gsub("%s+$", ""):gsub("%s+or%s+nil$", "")
+			if rhs == "nil" or isDecompName(rhs) then return nil end
+			if rhs == "..." then return "args" end
+			if rhs:match("^#") then return "count" end
+			if rhs:match("^not ") or rhs:find(" and true or false$") or rhs:match("^[%w_%.]+%s*[=~<>]=") then return "flag" end
+			local svc = rhs:match('^game:GetService%("([%w_]+)"%)$')
+			if svc then return svc end
+			if rhs:match("^require%(") then
+				return ident(rhs:match('"([^"]+)"%)%)?$') or rhs:match("([%w_]+)%)$"))
+			end
+			local class = rhs:match('^Instance%.new%("([%w_]+)"')
+			if class then return lowerFirst(class) end
+			if rhs:find(":LoadAnimation%(") then return "track" end
+			if rhs:match("^setmetatable%(") then return "object" end
+			local cloned = rhs:match("([%w_]+)%)?:Clone%(%)$") or rhs:match('"([^"]+)"%):Clone%(%)$')
+			if cloned then return lowerFirst(ident(cloned) or "object") .. "Clone" end
+			if rhs == "os.clock()" or rhs == "tick()" or rhs == "time()" then return "startTime" end
+			if rhs == "true" or rhs == "false" then return "flag" end
+			if rhs:match("^%-?%d") then return "value" end
+			if rhs:match('^"') or rhs:match("^'") then return "text" end
+			if rhs:match("^{") then return "list" end
+			local child = rhs:match(':WaitForChild%("([^"]+)"[^)]*%)$') or rhs:match(':FindFirstChild%("([^"]+)"[^)]*%)$')
+			if child then return ident(lowerFirst(child)) end
+			local ctor = rhs:match("^([%u][%w]*)%.new%(")
+			if ctor then
+				-- Vector2 -> vector, CFrame -> cframe, UDim2 -> udim (Ziffern stören, wenn ein Zähler drankommt)
+				ctor = ctor:gsub("%d+$", "")
+				return ctor:match("^%u%u") and ctor:lower() or lowerFirst(ctor)
+			end
+			local chain = rhs:match("^[%a_][%w_]*[%.%w_]*%.([%a_][%w_]*)$")
+			if chain then return lowerFirst(chain) end
+			if rhs:match("^[%a_][%w_]+$") and not KEYWORDS[rhs] then return lowerFirst(rhs) end -- local v5 = LocalPlayer (nicht aus "v")
+			local call = rhs:match("^([%a_][%w_]*)%(")
+			if call and not ({ tostring = 1, tonumber = 1, pcall = 1, unpack = 1, select = 1, type = 1, typeof = 1 })[call] then
+				call = call:gsub("^[Gg]et", ""):gsub("^[Cc]reate", ""):gsub("^[Mm]ake", ""):gsub("^[Bb]uild", "")
+				if call ~= "" then return ident(lowerFirst(call)) end
+			end
+			if call == "tostring" then return "text" end
+			if call == "tonumber" then return "number" end
+			local method = rhs:match(":([%a_][%w_]*)%([^()]*%)$")
+			if method then
+				method = method:gsub("^GetPlayerFrom", ""):gsub("^FindFirst", ""):gsub("^Get", ""):gsub("^Find", "")
+				if method ~= "" then return ident(lowerFirst(method)) end
+			end
+			return nil
+		end
+
+		-- Lua/Luau zerlegen: { art, text }, art = "n" Name, "s" String, "c" Kommentar, "o" alles andere.
+		local function lex(src)
+			local toks, i, n = {}, 1, #src
+			local function push(kind, text) toks[#toks + 1] = { kind, text } end
+			local function skipQuoted(k, q) -- gibt Index des schließenden Zeichens
+				k += 1
+				while k <= n do
+					local d = src:sub(k, k)
+					if d == "\\" then k += 2 elseif d == q or d == "\n" then return k else k += 1 end
+				end
+				return n
+			end
+			while i <= n do
+				local c = src:sub(i, i)
+				if c == "-" and src:sub(i + 1, i + 1) == "-" then
+					local eq = src:match("^%[(=*)%[", i + 2)
+					local j
+					if eq then
+						local _, e = src:find("]" .. eq .. "]", i + 4 + #eq, true)
+						j = e or n
+					else
+						j = (src:find("\n", i, true) or n + 1) - 1
+					end
+					push("c", src:sub(i, j))
+					i = j + 1
+				elseif c == "[" and src:match("^%[=*%[", i) then
+					local eq = src:match("^%[(=*)%[", i)
+					local _, e = src:find("]" .. eq .. "]", i + 2 + #eq, true)
+					local j = e or n
+					push("s", src:sub(i, j))
+					i = j + 1
+				elseif c == '"' or c == "'" then
+					local j = skipQuoted(i, c)
+					push("s", src:sub(i, j))
+					i = j + 1
+				elseif c == "`" then
+					-- Interpolierter String: Text bleibt String, Code in { } wird mit zerlegt.
+					local start, k = i, i + 1
+					while k <= n do
+						local d = src:sub(k, k)
+						if d == "\\" then
+							k += 2
+						elseif d == "`" then
+							break
+						elseif d == "{" then
+							push("s", src:sub(start, k))
+							local depth, m = 1, k + 1
+							while m <= n do
+								local e = src:sub(m, m)
+								if e == '"' or e == "'" then
+									m = skipQuoted(m, e)
+								elseif e == "{" then
+									depth += 1
+								elseif e == "}" then
+									depth -= 1
+									if depth == 0 then break end
+								end
+								m += 1
+							end
+							for _, t in lex(src:sub(k + 1, m - 1)) do toks[#toks + 1] = t end
+							start, k = m, m + 1
+						else
+							k += 1
+						end
+					end
+					push("s", src:sub(start, math.min(k, n)))
+					i = k + 1
+				elseif c:match("[%a_]") then
+					local word = src:match("^[%a_][%w_]*", i)
+					push("n", word)
+					i += #word
+				elseif c:match("%d") or (c == "." and src:sub(i + 1, i + 1):match("%d")) then
+					local num = src:match("^%.?%d[%w_%.]*", i)
+					push("o", num)
+					i += #num
+				else
+					push("o", c)
+					i += 1
+				end
+			end
+			return toks
+		end
+
+		-- Gibt neuen Code und Zahl der umbenannten Variablen. scriptName: Name für die Klassen-Tabelle des Moduls.
+		local function renameSource(src, scriptName)
+			local toks = lex(src)
+			local used, targets, order = {}, {}, {}
+			local function prevSignificant(k)
+				k -= 1
+				while k > 0 and toks[k][1] == "o" and toks[k][2]:match("^%s+$") do k -= 1 end
+				return k
+			end
+			for k, t in toks do
+				if t[1] == "n" then
+					used[t[2]] = true
+					-- Feld (obj.v1, obj:v1) ist kein Variablenname; ".." (Verkettung) schon.
+					local p = prevSignificant(k)
+					local isField = p > 0 and (toks[p][2] == ":" or (toks[p][2] == "." and not (p > 1 and toks[p - 1][2] == ".")))
+					t.field = isField
+					if not isField and isDecompName(t[2]) and not targets[t[2]] then
+						targets[t[2]] = true
+						table.insert(order, t[2]) -- Reihenfolge im Code, damit Zähler (vector, vector2 …) von oben nach unten laufen
+					end
+				end
+			end
+			if next(targets) == nil then return src, 0 end
+			-- Namen ableiten: aus local x = …, sonst aus Event-Parametern.
+			local wanted = {}
+			for name in targets do
+				local rhs = src:match("local%s+" .. name .. "%s*=%s*([^\n]+)")
+				if rhs and rhs:match("^{%s*};?%s*$") and scriptName and src:find(name .. ".__index = " .. name, 1, true) then
+					wanted[name] = ident(scriptName) -- local u2 = {}; u2.__index = u2 ist die Klasse des Moduls
+				else
+					wanted[name] = rhs and nameFromRhs(rhs)
+				end
+				if not wanted[name] then
+					local later = src:match("\n[ \t]*" .. name .. "[ \t]*=[ \t]*([^=\n][^\n]*)")
+					wanted[name] = later and nameFromRhs(later)
+				end
+			end
+			-- Rumpf jeder function Tabelle.Methode(pN …) über Block-Tiefe finden (function/if/do/repeat öffnen, end/until schließen).
+			local selfParams = {}
+			for k, t in toks do
+				if t[1] == "n" and t[2] == "function" and not t.field then
+					local m, sawDot, first = k + 1, false, nil
+					while m <= #toks and toks[m][2] ~= "(" do
+						if toks[m][2] == "." then sawDot = true end
+						m += 1
+					end
+					local q = m + 1
+					while q <= #toks and toks[q][1] == "o" and toks[q][2]:match("^%s+$") do q += 1 end
+					first = toks[q] and toks[q][1] == "n" and toks[q][2]
+					if sawDot and first and first:match("^p%d+$") then
+						local depth, e, hasSelf = 0, k, false
+						while e <= #toks do
+							local w = toks[e]
+							if w[1] == "n" and not w.field then
+								if w[2] == "function" or w[2] == "if" or w[2] == "do" or w[2] == "repeat" then
+									depth += 1
+								elseif w[2] == "end" or w[2] == "until" then
+									depth -= 1
+									if depth == 0 then break end
+								elseif w[2] == "self" then
+									hasSelf = true
+								end
+							end
+							e += 1
+						end
+						if not hasSelf then selfParams[first] = true end
+					end
+				end
+			end
+			for event, params in src:gmatch("%.([%a_][%w_]*):Connect%(function%(([^%)]*)%)") do
+				local names = EVENT_PARAMS[event]
+				if names then
+					local index = 0
+					for param in params:gmatch("[^,%s]+") do
+						index += 1
+						if targets[param] and not wanted[param] and names[index] then wanted[param] = names[index] end
+					end
+				end
+			end
+			-- Alles ohne Namen bekommt einen aus Schleife, Verwendung oder Rolle, damit keine Nummer-Namen übrig bleiben.
+			local roles, best = {}, {}
+			local function nextSig(k)
+				k += 1
+				while k <= #toks and toks[k][1] == "o" and toks[k][2]:match("^%s+$") do k += 1 end
+				return k
+			end
+			for k, t in toks do
+				if t[1] == "n" and not t.field then
+					local w = t[2]
+					if w == "function" then
+						local m = k + 1
+						while m <= #toks and toks[m][2] ~= "(" do m += 1 end
+						m += 1
+						while m <= #toks and toks[m][2] ~= ")" do
+							local v = toks[m]
+							if v[1] == "n" and targets[v[2]] and not roles[v[2]] then roles[v[2]] = "arg" end
+							m += 1
+						end
+					elseif w == "for" then
+						local m, vars = k + 1, {}
+						while m <= #toks and toks[m][2] ~= "in" and toks[m][2] ~= "=" and toks[m][2] ~= "do" do
+							if toks[m][1] == "n" then table.insert(vars, toks[m][2]) end
+							m += 1
+						end
+						local numeric, iter = toks[m] and toks[m][2] == "=", ""
+						local q = m + 1
+						while q <= #toks and toks[q][2] ~= "do" do
+							if toks[q][1] == "n" then iter ..= " " .. toks[q][2] end
+							q += 1
+						end
+						local second = iter:find("GetChildren") and "child" or iter:find("GetDescendants") and "descendant"
+							or iter:find("GetPlayers") and "player" or iter:find("ipairs") and "item" or "value"
+						for idx, v in vars do
+							if targets[v] and not roles[v] then
+								roles[v] = numeric and "i" or idx == 1 and (iter:find("ipairs") and "index" or "key") or second
+							end
+						end
+					elseif targets[w] then
+						-- Verwendung: name.Member / name:Member(
+						local n1 = nextSig(k)
+						local sep = toks[n1] and toks[n1][2]
+						if sep == "." or sep == ":" then
+							local n2 = nextSig(n1)
+							local role = toks[n2] and toks[n2][1] == "n" and MEMBER_TO_ROLE[toks[n2][2]]
+							if role and (not best[w] or role[2] < best[w][2]) then best[w] = role end
+						elseif sep == "(" and not best[w] then
+							best[w] = { "callback", 99 }
+						end
+					end
+				end
+			end
+
+			local map, count = {}, 0
+			for _, name in order do
+				if not wanted[name] and not selfParams[name] then
+					local role = roles[name]
+					if role == "arg" or not role then
+						role = best[name] and best[name][1] or role or "value"
+					end
+					wanted[name] = role
+				end
+				if selfParams[name] and not wanted[name] then
+					-- pN kommt nur in seiner eigenen Methode vor, und dort gibt es kein anderes self.
+					map[name] = "self"
+					count += 1
+					continue
+				end
+				local base = wanted[name]
+				if base and KEYWORDS[base] then base ..= "Value" end -- z. B. "type" aus einem Aufruf
+				if base and base:match("^[vup]%d*$") then base = "value" end -- sonst zählt der Zähler v2, v3 … endlos
+				if base then
+					local candidate, suffix = base, 1
+					while used[candidate] or KEYWORDS[candidate] or isDecompName(candidate) do -- "v" + 2 wäre wieder v2
+						suffix += 1
+						candidate = base .. suffix
+					end
+					used[candidate] = true
+					map[name] = candidate
+					count += 1
+				end
+			end
+			if count == 0 then return src, 0 end
+			local out = table.create(#toks)
+			for k, t in toks do
+				out[k] = (t[1] == "n" and not t.field and map[t[2]]) or t[2]
+			end
+			return table.concat(out), count
+		end
+
+		local function renameScripts()
+			local list, sel = {}, Selection:Get()
+			local roots = #sel > 0 and sel or { game }
+			for _, root in roots do
+				local ok, all = pcall(function()
+					local d = root == game and {} or root:GetDescendants()
+					if root == game then
+						for _, svc in game:GetChildren() do
+							local okSvc, sub = pcall(function() return svc.ClassName ~= "CoreGui" and svc:GetDescendants() or {} end)
+							if okSvc then table.move(sub, 1, #sub, #d + 1, d) end
+						end
+					else
+						table.insert(d, 1, root)
+					end
+					return d
+				end)
+				for _, obj in ok and all or {} do
+					if obj:IsA("LuaSourceContainer") then table.insert(list, obj) end
+				end
+			end
+			local r = { scripts = 0, names = 0, skipped = 0, seen = #list }
+			for i, s in list do
+				if i % 10 == 0 then
+					renameBtn.Text = ("Benenne um %d%% (%d/%d) …"):format(math.floor(i / #list * 100), i, #list)
+					task.wait()
+				end
+				pcall(function()
+					local src = s.Source
+					local renamed, count = renameSource(src, s.Name)
+					if count == 0 then return end
+					-- Sicherheitsnetz wie bei Credits: kompilierte der Code vorher und danach nicht mehr, bleibt er.
+					local okBefore, before = pcall(loadstring, src)
+					local okAfter, after = pcall(loadstring, renamed)
+					if okBefore and before and not (okAfter and after) then
+						r.skipped += 1
+						return
+					end
+					game:GetService("ScriptEditorService"):UpdateSourceAsync(s, function() return renamed end)
+					r.scripts += 1
+					r.names += count
+				end)
+			end
+			return r
+		end
+
+		local confirmUntil = 0
+		renameBtn.Activated:Connect(function()
+			if RunService:IsRunning() then
+				renameLabel.TextColor3, renameLabel.Text = BAD, "Erst den Play-Test beenden."
+				return
+			end
+			if not renameBtn.Active then return end
+			if os.clock() > confirmUntil then
+				confirmUntil = os.clock() + 5
+				local sel = #Selection:Get() > 0
+				renameBtn.Text = sel and "Sicher? Nur Auswahl, nochmal" or "Sicher? Ganze Place, nochmal"
+				task.delay(5, function() if renameBtn.Active then renameBtn.Text = "Variablennamen aufräumen" end end)
+				return
+			end
+			confirmUntil = 0
+			renameBtn.Active = false
+			local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: Variablennamen aufräumen")
+			local ok, r = pcall(renameScripts)
+			if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+			renameBtn.Active, renameBtn.Text = true, "Variablennamen aufräumen"
+			if ok then
+				renameLabel.TextColor3 = OK
+				renameLabel.Text = ("%d Variablen in %d von %d Scripts umbenannt.%s Strg+Z macht es rückgängig.")
+					:format(r.names, r.scripts, r.seen, r.skipped > 0 and (" %d Scripts nicht angefasst, sie wären sonst kaputt gegangen."):format(r.skipped) or "")
+			else
+				renameLabel.TextColor3, renameLabel.Text = BAD, "Fehler: " .. tostring(r)
+			end
+		end)
+	end
 end
 
 showTab("Laden")
