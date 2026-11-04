@@ -852,6 +852,32 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			HealthChanged = { "health" }, StateChanged = { "oldState", "newState" }, Running = { "speed" },
 		}
 
+		-- Was nach "name." oder "name:" kommt, verrät, was die Variable ist. Erste passende Rolle in dieser Reihenfolge.
+		local MEMBER_ROLES = {
+			{ "player", { "Character", "UserId", "Kick", "Backpack", "PlayerGui", "DisplayName", "CharacterAdded" } },
+			{ "character", { "Humanoid", "HumanoidRootPart" } },
+			{ "humanoid", { "Health", "MaxHealth", "TakeDamage", "WalkSpeed", "JumpPower", "Died", "RootPart" } },
+			{ "track", { "TimePosition", "AdjustSpeed", "IsPlaying", "GetMarkerReachedSignal" } },
+			{ "connection", { "Disconnect" } },
+			{ "remote", { "FireServer", "FireClient", "FireAllClients", "InvokeServer", "OnClientEvent", "OnServerEvent" } },
+			{ "input", { "UserInputType", "KeyCode", "UserInputState" } },
+			{ "part", { "Anchored", "CanCollide", "AssemblyLinearVelocity", "Velocity", "BrickColor", "Material" } },
+			{ "vector", { "Magnitude", "Unit" } },
+			{ "signal", { "Connect", "Once" } },
+			{ "label", { "Text", "TextColor3", "TextTransparency" } },
+			{ "gui", { "Visible", "AbsoluteSize", "BackgroundTransparency" } },
+			{ "cframe", { "LookVector", "RightVector", "UpVector", "Inverse", "ToWorldSpace", "ToObjectSpace" } },
+			{ "part", { "CFrame", "Position", "Size", "Orientation" } },
+			{ "instance", { "IsA", "FindFirstChild", "WaitForChild", "GetChildren", "GetDescendants", "Destroy", "Parent",
+				"GetAttribute", "SetAttribute", "Clone", "FindFirstChildOfClass", "FindFirstAncestor", "Name", "ClassName" } },
+		}
+		local MEMBER_TO_ROLE = {}
+		for rank, entry in MEMBER_ROLES do
+			for _, member in entry[2] do
+				if not MEMBER_TO_ROLE[member] then MEMBER_TO_ROLE[member] = { entry[1], rank } end
+			end
+		end
+
 		local function isDecompName(n)
 			return n:match("^[vup]%d+$") ~= nil or n:match("^[%a][%w]*_[%w_]*ret%d*$") ~= nil
 		end
@@ -897,7 +923,7 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			end
 			local chain = rhs:match("^[%a_][%w_]*[%.%w_]*%.([%a_][%w_]*)$")
 			if chain then return lowerFirst(chain) end
-			if rhs:match("^[%a_][%w_]*$") and not KEYWORDS[rhs] then return lowerFirst(rhs) end -- local v5 = LocalPlayer
+			if rhs:match("^[%a_][%w_]+$") and not KEYWORDS[rhs] then return lowerFirst(rhs) end -- local v5 = LocalPlayer (nicht aus "v")
 			local call = rhs:match("^([%a_][%w_]*)%(")
 			if call and not ({ tostring = 1, tonumber = 1, pcall = 1, unpack = 1, select = 1, type = 1, typeof = 1 })[call] then
 				call = call:gsub("^[Gg]et", ""):gsub("^[Cc]reate", ""):gsub("^[Mm]ake", ""):gsub("^[Bb]uild", "")
@@ -1075,8 +1101,68 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					end
 				end
 			end
+			-- Alles ohne Namen bekommt einen aus Schleife, Verwendung oder Rolle, damit keine Nummer-Namen übrig bleiben.
+			local roles, best = {}, {}
+			local function nextSig(k)
+				k += 1
+				while k <= #toks and toks[k][1] == "o" and toks[k][2]:match("^%s+$") do k += 1 end
+				return k
+			end
+			for k, t in toks do
+				if t[1] == "n" and not t.field then
+					local w = t[2]
+					if w == "function" then
+						local m = k + 1
+						while m <= #toks and toks[m][2] ~= "(" do m += 1 end
+						m += 1
+						while m <= #toks and toks[m][2] ~= ")" do
+							local v = toks[m]
+							if v[1] == "n" and targets[v[2]] and not roles[v[2]] then roles[v[2]] = "arg" end
+							m += 1
+						end
+					elseif w == "for" then
+						local m, vars = k + 1, {}
+						while m <= #toks and toks[m][2] ~= "in" and toks[m][2] ~= "=" and toks[m][2] ~= "do" do
+							if toks[m][1] == "n" then table.insert(vars, toks[m][2]) end
+							m += 1
+						end
+						local numeric, iter = toks[m] and toks[m][2] == "=", ""
+						local q = m + 1
+						while q <= #toks and toks[q][2] ~= "do" do
+							if toks[q][1] == "n" then iter ..= " " .. toks[q][2] end
+							q += 1
+						end
+						local second = iter:find("GetChildren") and "child" or iter:find("GetDescendants") and "descendant"
+							or iter:find("GetPlayers") and "player" or iter:find("ipairs") and "item" or "value"
+						for idx, v in vars do
+							if targets[v] and not roles[v] then
+								roles[v] = numeric and "i" or idx == 1 and (iter:find("ipairs") and "index" or "key") or second
+							end
+						end
+					elseif targets[w] then
+						-- Verwendung: name.Member / name:Member(
+						local n1 = nextSig(k)
+						local sep = toks[n1] and toks[n1][2]
+						if sep == "." or sep == ":" then
+							local n2 = nextSig(n1)
+							local role = toks[n2] and toks[n2][1] == "n" and MEMBER_TO_ROLE[toks[n2][2]]
+							if role and (not best[w] or role[2] < best[w][2]) then best[w] = role end
+						elseif sep == "(" and not best[w] then
+							best[w] = { "callback", 99 }
+						end
+					end
+				end
+			end
+
 			local map, count = {}, 0
 			for _, name in order do
+				if not wanted[name] and not selfParams[name] then
+					local role = roles[name]
+					if role == "arg" or not role then
+						role = best[name] and best[name][1] or role or "value"
+					end
+					wanted[name] = role
+				end
 				if selfParams[name] and not wanted[name] then
 					-- pN kommt nur in seiner eigenen Methode vor, und dort gibt es kein anderes self.
 					map[name] = "self"
@@ -1084,9 +1170,11 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					continue
 				end
 				local base = wanted[name]
-				if base and not KEYWORDS[base] then
+				if base and KEYWORDS[base] then base ..= "Value" end -- z. B. "type" aus einem Aufruf
+				if base and base:match("^[vup]%d*$") then base = "value" end -- sonst zählt der Zähler v2, v3 … endlos
+				if base then
 					local candidate, suffix = base, 1
-					while used[candidate] or KEYWORDS[candidate] do
+					while used[candidate] or KEYWORDS[candidate] or isDecompName(candidate) do -- "v" + 2 wäre wieder v2
 						suffix += 1
 						candidate = base .. suffix
 					end
