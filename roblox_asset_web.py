@@ -20,6 +20,7 @@ import uuid
 import webbrowser
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -32,15 +33,47 @@ ASSET_TYPES = {1: "Image", 2: "T-Shirt", 3: "Audio", 4: "Mesh", 8: "Hat", 10: "M
                44: "Shoulder", 45: "Front", 46: "Back", 47: "Waist", 61: "Emote", 62: "Video"}
 
 
-def asset_info(asset_id):
-    """Name und Typ für den Dateinamen. Ohne Treffer nur die ID."""
+@lru_cache(maxsize=4096)
+def asset_details(asset_id):
+    """Economy-Details eines Assets (Name, Typ, Ersteller), ohne Treffer ein leeres Dict."""
     try:
         url = f"https://economy.roblox.com/v2/assets/{asset_id}/details"
         with urllib.request.urlopen(url, timeout=10) as r:
-            d = json.load(r)
-        return d.get("Name") or "", ASSET_TYPES.get(d.get("AssetTypeId"), "")
+            return json.load(r)
     except Exception:
-        return "", ""
+        return {}
+
+
+def bulk_details(ids):
+    """Name, Typ und User-Ersteller für viele IDs über develop.roblox.com, 50 pro Anfrage (braucht cookie.txt).
+    Fehlende IDs fehlen im Ergebnis; der Aufrufer fragt die einzeln über economy nach."""
+    cookie = load_cookie()
+    if not cookie:
+        return {}
+
+    def chunk(part):
+        req = urllib.request.Request("https://develop.roblox.com/v1/assets?assetIds=" + ",".join(part),
+                                     headers={"Cookie": ".ROBLOSECURITY=" + cookie, "User-Agent": "Roblox/WinInet"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.load(r).get("data", [])
+        except Exception:
+            return []
+
+    out = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for rows in pool.map(chunk, [ids[i:i + 50] for i in range(0, len(ids), 50)]):
+            for d in rows:
+                creator = d.get("creator") or {}
+                out[str(d["id"])] = {"name": d.get("name") or str(d["id"]), "type": d.get("type") or "",
+                                     "creator": creator.get("targetId") if creator.get("type") == "User" else None}
+    return out
+
+
+def asset_info(asset_id):
+    """Name und Typ für den Dateinamen. Ohne Treffer nur die ID."""
+    d = asset_details(asset_id)
+    return d.get("Name") or "", ASSET_TYPES.get(d.get("AssetTypeId"), "")
 
 
 def safe_name(name):
@@ -70,9 +103,39 @@ def open_cloud(path, key, body=None, ctype=None):
         raise RuntimeError(f"Open Cloud HTTP {e.code} {hint}: {e.read().decode('utf-8', 'ignore')[:200]}")
 
 
-def upload_image(asset_id, user_id, place=None):
-    """Lädt ein fremdes Bild herunter und unter dem eigenen Account neu hoch (Open Cloud, apikey.txt).
-    Gibt die neue Bild-ID zurück, die in Texture/Image-Feldern funktioniert."""
+# Endung aus guess_ext: (assetType für Open Cloud, Content-Type). Bilder laufen als Decal, siehe upload_asset.
+UPLOAD_TYPES = {
+    "png": ("Decal", "image/png"), "jpg": ("Decal", "image/jpeg"),
+    "rbxm": ("Animation", "model/x-rbxm"), "rbxmx": ("Animation", "model/x-rbxmx"),
+    "mesh": ("Mesh", "model/x-file-mesh-data"),
+    "ogg": ("Audio", "audio/ogg"), "mp3": ("Audio", "audio/mpeg"), "wav": ("Audio", "audio/wav"), "flac": ("Audio", "audio/flac"),
+}
+
+
+def create_asset(key, asset_type, name, data, ext, ctype, user_id):
+    """Ein Asset per Open Cloud anlegen und warten, bis Roblox es verarbeitet hat. Gibt die neue ID."""
+    boundary = uuid.uuid4().hex
+    request = json.dumps({"assetType": asset_type, "displayName": name[:50], "description": name[:50],
+                          "creationContext": {"creator": {"userId": str(user_id)}}})
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="request"\r\n\r\n{request}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="fileContent"; filename="asset.{ext}"\r\n'
+            f'Content-Type: {ctype}\r\n\r\n').encode() + data + f"\r\n--{boundary}--\r\n".encode()
+    op = open_cloud("assets", key, body, f"multipart/form-data; boundary={boundary}")
+    for _ in range(30):  # Roblox verarbeitet den Upload asynchron, Animationen und Meshes brauchen länger
+        if op.get("done"):
+            break
+        time.sleep(1)
+        op = open_cloud(op["path"], key)
+    if not op.get("done"):
+        raise RuntimeError("Roblox braucht zu lange, gleich nochmal versuchen")
+    if "response" not in op:
+        raise RuntimeError(f"Roblox lehnt ab: {json.dumps(op.get('error', op))[:200]}")
+    return str(op["response"]["assetId"])
+
+
+def upload_asset(asset_id, user_id, place=None):
+    """Lädt ein fremdes Bild, eine Animation, einen Sound oder ein Mesh herunter und unter dem eigenen
+    Account neu hoch (Open Cloud, apikey.txt). Gibt die neue ID zurück, die in den Eigenschaften funktioniert."""
     key = API_KEY_FILE.read_text("utf-8").strip() if API_KEY_FILE.is_file() else ""
     if not key:
         raise RuntimeError("apikey.txt fehlt. Siehe README: Hochladen einrichten")
@@ -80,25 +143,18 @@ def upload_image(asset_id, user_id, place=None):
     if err:
         raise RuntimeError(err)
     ext = guess_ext(data)
-    ctype = {"png": "image/png", "jpg": "image/jpeg"}.get(ext)
-    if not ctype:
-        raise RuntimeError(f"Kein Bild ({ext})")
-    name = safe_name(asset_info(asset_id)[0]) or "Textur"
-    boundary = uuid.uuid4().hex
-    request = json.dumps({"assetType": "Decal", "displayName": name[:50], "description": "Textur",
-                          "creationContext": {"creator": {"userId": str(user_id)}}})
-    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="request"\r\n\r\n{request}\r\n'
-            f'--{boundary}\r\nContent-Disposition: form-data; name="fileContent"; filename="textur.{ext}"\r\n'
-            f'Content-Type: {ctype}\r\n\r\n').encode() + data + f"\r\n--{boundary}--\r\n".encode()
-    op = open_cloud("assets", key, body, f"multipart/form-data; boundary={boundary}")
-    for _ in range(20):  # Roblox verarbeitet den Upload asynchron
-        if op.get("done"):
-            break
-        time.sleep(1)
-        op = open_cloud(op["path"], key)
-    if not op.get("done"):
-        raise RuntimeError("Roblox braucht zu lange, gleich nochmal versuchen")
-    decal_id = str(op["response"]["assetId"])
+    if ext in ("rbxm", "rbxmx") and b"KeyframeSequence" not in data and b"CurveAnimation" not in data:
+        raise RuntimeError("Model, keine Animation: Models lädt das Plugin nicht neu hoch")
+    if ext not in UPLOAD_TYPES:
+        raise RuntimeError(f"Dieser Typ geht nicht hoch ({ext})")
+    asset_type, ctype = UPLOAD_TYPES[ext]
+    name = safe_name(asset_info(asset_id)[0]) or asset_type
+    new_id = create_asset(key, asset_type, name, data, ext, ctype, user_id)
+    return new_id if asset_type != "Decal" else image_id(new_id)
+
+
+def image_id(decal_id):
+    """Open Cloud gibt bei Bildern die Decal-ID. Texturen brauchen die Bild-ID darin; die steht im Decal-Asset selbst."""
     # Open Cloud gibt die Decal-ID. Texturen brauchen die Bild-ID darin; die steht im Decal-Asset selbst.
     for _ in range(5):
         decal, err = fetch(decal_id, load_cookie())
@@ -161,13 +217,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(502, err)
             self.send(200, data, "application/octet-stream", file_name(ids[0], data))
         elif url.path == "/api/plugin-upload":
-            # Plugin: Textur unter eigenem Namen neu hochladen (Studio selbst darf das noch nicht).
+            # Plugin: Bild, Animation, Sound oder Mesh unter eigenem Namen neu hochladen (Studio selbst darf das nicht).
             ids = extract_ids(q.get("q", [""])[0], bare=True)
             user = q.get("user", [""])[0]
             if not ids or not user.isdigit():
                 return self.error(400, "ID oder User fehlt.")
             try:
-                new_id = upload_image(ids[0], user, parse_place(q.get("place", [""])[0]))
+                new_id = upload_asset(ids[0], user, parse_place(q.get("place", [""])[0]))
             except Exception as e:
                 return self.error(502, str(e))
             self.send(200, json.dumps({"id": new_id}).encode())
@@ -237,9 +293,15 @@ class Handler(BaseHTTPRequestHandler):
     def plugin_bulk(self, ids):
         """Für das Studio-Plugin: nur Namen und Typen, damit die Liste schnell da ist.
         Vorschau und Download holt das Plugin erst auf Klick."""
+        found = bulk_details(ids)
+        missing = [i for i in ids if i not in found]
         with ThreadPoolExecutor(max_workers=6) as pool:
-            infos = list(pool.map(asset_info, ids))
-        self.send(200, json.dumps([{"id": i, "name": n or i, "type": k} for i, (n, k) in zip(ids, infos)]).encode())
+            for i, d in zip(missing, pool.map(asset_details, missing)):
+                creator = d.get("Creator") or {}
+                found[i] = {"name": d.get("Name") or i, "type": ASSET_TYPES.get(d.get("AssetTypeId"), ""),
+                            "creator": creator.get("CreatorTargetId") if creator.get("CreatorType") == "User" else None}
+        # creator: nur bei User-Assets gesetzt, damit das Plugin eigene Assets beim Neu-Hochladen überspringt.
+        self.send(200, json.dumps([{"id": i, **found[i]} for i in ids]).encode())
 
     def plugin_save(self, ids, place, folder):
         """Für das Studio-Plugin: Assets in downloads/ oder einen Unterordner davon speichern."""

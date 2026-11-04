@@ -19,34 +19,48 @@ local SERVER = "http://127.0.0.1:8765"
 -- Webseiten können diesen Header nicht mitschicken, so nimmt der Server nur Anfragen vom Plugin an.
 local PLUGIN_HEADERS = { ["X-Asset-Downloader"] = "plugin" }
 
-local BG = Color3.fromRGB(20, 21, 26)
-local CARD = Color3.fromRGB(30, 32, 40)
-local FIELD = Color3.fromRGB(42, 45, 56)
-local TEXT = Color3.fromRGB(235, 236, 240)
-local MUTED = Color3.fromRGB(150, 154, 168)
-local ACCENT = Color3.fromRGB(226, 60, 60)
-local BLUE = Color3.fromRGB(60, 120, 210)
-local GREEN = Color3.fromRGB(40, 150, 90)
-local PURPLE = Color3.fromRGB(140, 90, 210)
-local GREY = Color3.fromRGB(62, 65, 78)
-local BAD = Color3.fromRGB(240, 120, 110)
-local OK = Color3.fromRGB(110, 210, 150)
+-- Farben wie iOS im Dunkelmodus: schwarzer Grund, gestufte Grautöne, genau ein Akzent.
+local BG = Color3.fromRGB(0, 0, 0)
+local CARD = Color3.fromRGB(28, 28, 30) -- #1C1C1E
+local FIELD = Color3.fromRGB(44, 44, 46) -- #2C2C2E, Felder und Listenzeilen in Karten
+local LINE = Color3.fromRGB(56, 56, 58) -- #38383A, Trennlinien
+local TEXT = Color3.fromRGB(255, 255, 255)
+local MUTED = Color3.fromRGB(152, 152, 159) -- #98989F, 6,3:1 auf CARD
+local ACCENT = Color3.fromRGB(10, 132, 255) -- #0A84FF, nur Hauptaktion und Auswahl
+local GREY = Color3.fromRGB(58, 58, 60) -- #3A3A3C, Nebenaktionen
+-- Früher eigene Farben je Knopf. Jetzt sind alle Nebenaktionen grau, damit Blau eine Bedeutung behält.
+local BLUE, GREEN, PURPLE = GREY, GREY, GREY
+local BAD = Color3.fromRGB(255, 69, 58) -- #FF453A
+local OK = Color3.fromRGB(48, 209, 88) -- #30D158
+local FONT = {
+	regular = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Regular),
+	medium = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Medium),
+	bold = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.SemiBold),
+	heavy = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold),
+	mono = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Regular),
+}
 
-local toolbar = plugin:CreateToolbar("Asset Downloader")
-local toggle = toolbar:CreateButton("Asset Downloader", "Roblox-Assets laden und ansehen", "")
+local toolbar = plugin:CreateToolbar("Stealmaxxing")
+local toggle = toolbar:CreateButton("Stealmaxxing", "Assets, VFX und Cutscenes aus jedem Spiel holen", "")
 toggle.ClickableWhenViewportHidden = true
 
 local widget = plugin:CreateDockWidgetPluginGuiAsync("AssetDownloader",
-	DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, false, false, 340, 620, 280, 420))
-widget.Title = "Asset Downloader"
+	DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, false, false, 390, 680, 360, 440))
+widget.Title = "Stealmaxxing"
 toggle.Click:Connect(function() widget.Enabled = not widget.Enabled end)
 widget:GetPropertyChangedSignal("Enabled"):Connect(function() toggle:SetActive(widget.Enabled) end)
 
 -- UI ---------------------------------------------------------------------------------------
 
 local function corner(inst, radius)
-	Instance.new("UICorner", inst).CornerRadius = UDim.new(0, radius or 6)
+	Instance.new("UICorner", inst).CornerRadius = UDim.new(0, radius or 8)
 	return inst
+end
+
+local function stroke(inst, color)
+	local s = Instance.new("UIStroke", inst)
+	s.Color, s.Thickness, s.ApplyStrokeMode = color or LINE, 1, Enum.ApplyStrokeMode.Border
+	return s
 end
 
 local function padding(inst, px)
@@ -74,11 +88,12 @@ local root = Instance.new("ScrollingFrame")
 root.Size = UDim2.fromScale(1, 1)
 root.BackgroundColor3 = BG
 root.BorderSizePixel = 0
-root.ScrollBarThickness = 6
+root.ScrollBarThickness = 4
+root.ScrollBarImageColor3 = ACCENT
 root.AutomaticCanvasSize = Enum.AutomaticSize.Y
 root.CanvasSize = UDim2.new()
 root.Parent = widget
-padding(root, 12)
+padding(root, 14)
 vlist(root, 10)
 
 -- add() legt Elemente in den aktuellen Container (Seite oder Karte), in der Reihenfolge des Aufrufs.
@@ -96,8 +111,9 @@ local function label(text, color, size)
 	l.BackgroundTransparency = 1
 	l.Size = UDim2.new(1, 0, 0, 0)
 	l.AutomaticSize = Enum.AutomaticSize.Y
-	l.Font = Enum.Font.Gotham
-	l.TextSize = size or 13
+	l.FontFace = FONT.regular
+	l.TextSize = size or 14
+	l.LineHeight = 1.1
 	l.TextColor3 = color or MUTED
 	l.TextXAlignment = Enum.TextXAlignment.Left
 	l.TextWrapped = true
@@ -110,7 +126,7 @@ local function input(placeholder)
 	t.Size = UDim2.new(1, 0, 0, 34)
 	t.BackgroundColor3 = FIELD
 	t.BorderSizePixel = 0
-	t.Font = Enum.Font.Code
+	t.FontFace = FONT.regular
 	t.TextSize = 14
 	t.TextColor3 = TEXT
 	t.PlaceholderText = placeholder
@@ -120,8 +136,13 @@ local function input(placeholder)
 	t.TextXAlignment = Enum.TextXAlignment.Left
 	t.ClipsDescendants = true
 	local p = Instance.new("UIPadding", t)
-	p.PaddingLeft, p.PaddingRight = UDim.new(0, 10), UDim.new(0, 10)
-	return add(corner(t))
+	p.PaddingLeft, p.PaddingRight = UDim.new(0, 12), UDim.new(0, 12)
+	-- Fokusring in Akzentfarbe nur beim Tippen, wie bei macOS.
+	local s = stroke(t, ACCENT)
+	s.Thickness, s.Enabled = 2, false
+	t.Focused:Connect(function() s.Enabled = true end)
+	t.FocusLost:Connect(function() s.Enabled = false end)
+	return add(corner(t, 10))
 end
 
 local function makeButton(text, color)
@@ -130,22 +151,22 @@ local function makeButton(text, color)
 	b.BackgroundColor3 = color
 	b.BorderSizePixel = 0
 	b.AutoButtonColor = true
-	b.Font = Enum.Font.GothamBold
+	b.FontFace = FONT.bold
 	b.TextSize = 14
 	b.TextColor3 = Color3.new(1, 1, 1)
 	b.Text = text
-	return corner(b)
+	return corner(b, 10)
 end
 
 -- Rundes i neben einem Knopf. Klick klappt die Erklärung darunter auf und zu.
 local function infoIcon(parent, hint, layoutOrder)
 	local i = Instance.new("TextButton")
 	i.Size = UDim2.new(0, 34, 0, 34)
-	i.BackgroundColor3 = GREY
-	i.Font = Enum.Font.GothamBold
+	i.BackgroundColor3 = FIELD
+	i.FontFace = FONT.bold
 	i.TextSize = 15
-	i.TextColor3 = TEXT
-	i.Text = "i"
+	i.TextColor3 = MUTED
+	i.Text = "?"
 	i.LayoutOrder = layoutOrder
 	corner(i, 17)
 	i.Parent = parent
@@ -158,16 +179,17 @@ local function hintLabel(parent, text)
 	h.Size = UDim2.new(1, 0, 0, 0)
 	h.AutomaticSize = Enum.AutomaticSize.Y
 	h.BackgroundColor3 = FIELD
-	h.Font = Enum.Font.Gotham
-	h.TextSize = 12
+	h.FontFace = FONT.regular
+	h.TextSize = 13
+	h.LineHeight = 1.15
 	h.TextColor3 = TEXT
 	h.TextWrapped = true
 	h.TextXAlignment = Enum.TextXAlignment.Left
 	h.Text = text
 	h.LayoutOrder = 2
 	h.Visible = false
-	padding(h, 8)
-	corner(h)
+	padding(h, 12)
+	corner(h, 10)
 	h.Parent = parent
 	return h
 end
@@ -208,31 +230,70 @@ local function card(title, subtitle)
 	c.Size = UDim2.new(1, 0, 0, 0)
 	c.AutomaticSize = Enum.AutomaticSize.Y
 	c.BackgroundColor3 = CARD
-	corner(c, 10)
-	padding(c, 12)
-	vlist(c, 8)
+	corner(c, 14)
+	padding(c, 16)
+	vlist(c, 10)
 	container = currentPage or container -- jede Karte direkt auf die Seite, nicht in die vorige Karte
 	add(c)
 	container = c
-	label(title, TEXT, 16).Font = Enum.Font.GothamBold
-	if subtitle then label(subtitle) end
+	local t = label(title, TEXT, 16)
+	t.FontFace = FONT.bold
+	if subtitle then label(subtitle, MUTED, 13) end
 	return c
 end
 
 -- Kopf -------------------------------------------------------------------------------------
 
-label("Asset Downloader", TEXT, 22).Font = Enum.Font.GothamBlack
-label("Assets laden, ansehen, sammeln und reparieren.")
+do
+	local head = add(Instance.new("Frame"))
+	head.Size, head.BackgroundTransparency = UDim2.new(1, 0, 0, 44), 1
+	-- Logo: App-Icon mit drei steigenden Balken, der höchste in Akzentblau. Steht für "maxxing".
+	local icon = Instance.new("Frame")
+	icon.Size, icon.BackgroundColor3 = UDim2.fromOffset(42, 42), Color3.new(1, 1, 1)
+	corner(icon, 10)
+	local sheen = Instance.new("UIGradient", icon) -- dezentes Material wie bei iOS-Icons, oben etwas heller
+	sheen.Rotation, sheen.Color = 90, ColorSequence.new(Color3.fromRGB(64, 64, 68), Color3.fromRGB(30, 30, 32))
+	icon.Parent = head
+	for i, h in { 10, 17, 24 } do
+		local bar = Instance.new("Frame")
+		bar.AnchorPoint = Vector2.new(0, 1)
+		bar.Size, bar.Position = UDim2.fromOffset(6, h), UDim2.fromOffset(8 + (i - 1) * 10, 33)
+		bar.BackgroundColor3 = i == 3 and ACCENT or Color3.fromRGB(235, 235, 245)
+		bar.BorderSizePixel = 0
+		corner(bar, 3)
+		bar.Parent = icon
+	end
+	local title = Instance.new("TextLabel")
+	title.Size, title.Position, title.BackgroundTransparency = UDim2.new(1, -54, 0, 24), UDim2.fromOffset(54, 1), 1
+	title.FontFace, title.TextSize, title.TextColor3 = FONT.heavy, 22, TEXT
+	title.TextXAlignment, title.Text = Enum.TextXAlignment.Left, "Stealmaxxing"
+	title.Parent = head
+	local sub = Instance.new("TextLabel")
+	sub.Size, sub.Position, sub.BackgroundTransparency = UDim2.new(1, -54, 0, 16), UDim2.fromOffset(54, 25), 1
+	sub.FontFace, sub.TextSize, sub.TextColor3 = FONT.regular, 13, MUTED
+	sub.TextXAlignment, sub.Text = Enum.TextXAlignment.Left, "Asset-Toolkit für Roblox Studio"
+	sub.Parent = head
+end
 
+-- Tabs als Segmented Control wie bei iOS: ein Daumen gleitet unter den gewählten Namen.
 local tabBar = add(Instance.new("Frame"))
-tabBar.Size, tabBar.BackgroundColor3 = UDim2.new(1, 0, 0, 38), CARD
-corner(tabBar, 10)
-padding(tabBar, 3)
-local tabList = Instance.new("UIListLayout", tabBar)
-tabList.FillDirection, tabList.Padding, tabList.SortOrder = Enum.FillDirection.Horizontal, UDim.new(0, 3), Enum.SortOrder.LayoutOrder
+tabBar.Size, tabBar.BackgroundColor3 = UDim2.new(1, 0, 0, 34), CARD
+corner(tabBar, 9)
+do
+	local thumb = Instance.new("Frame")
+	thumb.Name, thumb.BackgroundColor3, thumb.BorderSizePixel = "Thumb", Color3.fromRGB(99, 99, 102), 0
+	corner(thumb, 7)
+	thumb.Parent = tabBar
+	local track = Instance.new("Frame")
+	track.Name, track.BackgroundTransparency = "Track", 1
+	track.Size, track.Position = UDim2.new(1, -4, 1, -4), UDim2.fromOffset(2, 2)
+	local l = Instance.new("UIListLayout", track)
+	l.FillDirection, l.SortOrder, l.HorizontalFlex = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, Enum.UIFlexAlignment.Fill
+	track.Parent = tabBar
+end
 
 -- Status gilt für alle Tabs, deshalb über den Seiten.
-local status = label("Server muss laufen: start.bat doppelklicken.")
+local status = label("Server muss laufen: start.bat doppelklicken.", MUTED, 13)
 -- Neue IDs nach dem Hochladen, markierbar zum Kopieren.
 local idsBox = input("")
 idsBox.TextEditable, idsBox.MultiLine, idsBox.TextWrapped = false, true, true
@@ -242,30 +303,73 @@ idsBox.Visible = false
 local tabs, pages = {}, {}
 -- Die Vorschau-Karte gibt es einmal; sie wandert zwischen Laden und Bulk (dort oben über der Liste).
 local previewCard, previewOrder, bulkCard, bulkPreviewUsed
-local function showTab(name)
-	for n, page in pages do
-		page.Visible = n == name
-		tabs[n].BackgroundColor3 = n == name and ACCENT or CARD
-		tabs[n].TextColor3 = n == name and Color3.new(1, 1, 1) or MUTED
+local SMOOTH = TweenInfo.new(0.38, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+local function moveThumb(animate)
+	local b = tabs[tabBar:GetAttribute("Shown")]
+	if not b or b.AbsoluteSize.X == 0 then return end
+	local goal = { Position = UDim2.fromOffset(b.AbsolutePosition.X - tabBar.AbsolutePosition.X, 2), Size = UDim2.new(0, b.AbsoluteSize.X, 1, -4) }
+	if animate then
+		game:GetService("TweenService"):Create(tabBar.Thumb, SMOOTH, goal):Play()
+	else
+		tabBar.Thumb.Position, tabBar.Thumb.Size = goal.Position, goal.Size
 	end
-	if previewCard and name == "Laden" then
-		previewCard.Parent, previewCard.LayoutOrder, previewCard.Visible = pages.Laden, previewOrder, true
-	elseif previewCard and name == "Bulk" then
-		previewCard.Parent, previewCard.LayoutOrder, previewCard.Visible = pages.Bulk, bulkCard.LayoutOrder - 1, bulkPreviewUsed == true
+end
+tabBar:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() task.defer(moveThumb, false) end)
+
+local function showTab(name)
+	local TweenService = game:GetService("TweenService")
+	local okMotion, reduced = pcall(function() return game:GetService("GuiService").ReducedMotionEnabled end)
+	local before = tabBar:GetAttribute("Shown")
+	local animate = widget.Enabled and before ~= nil and before ~= name and not (okMotion and reduced)
+	tabBar:SetAttribute("Shown", name)
+	for n, page in pages do
+		page.Parent.Visible = n == name
+		local goal = { TextColor3 = n == name and TEXT or MUTED }
+		if animate then TweenService:Create(tabs[n], TweenInfo.new(0.2), goal):Play() else tabs[n].TextColor3 = goal.TextColor3 end
+	end
+	moveThumb(animate)
+	if animate then
+		-- Neue Seite kommt aus der Richtung des Tabs und blendet über eine schwarze Fläche ein.
+		local p = pages[name]
+		p.Position = UDim2.fromOffset(tabs[name].LayoutOrder > tabs[before].LayoutOrder and 28 or -28, 0)
+		TweenService:Create(p, SMOOTH, { Position = UDim2.new() }):Play()
+		local fade = widget:FindFirstChild("Fade")
+		if not fade then
+			fade = Instance.new("Frame")
+			fade.Name, fade.BackgroundColor3, fade.BorderSizePixel, fade.ZIndex = "Fade", BG, 0, 5
+			fade.Parent = widget
+		end
+		local y = tabBar.AbsolutePosition.Y + tabBar.AbsoluteSize.Y + root.CanvasPosition.Y + 6
+		fade.Position, fade.Size = UDim2.fromOffset(0, y), UDim2.new(1, 0, 1, -y)
+		fade.BackgroundTransparency, fade.Visible = 0, true
+		local tw = TweenService:Create(fade, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 1 })
+		tw.Completed:Connect(function(state)
+			if state == Enum.PlaybackState.Completed then fade.Visible = false end
+		end)
+		tw:Play()
 	end
 	root.CanvasPosition = Vector2.zero
 end
 
+-- Neuer Tab: Segment im Control und eine Seite. Die Seite steckt in einem Halter, damit sie beim
+-- Wechsel seitlich hereingleiten kann, ohne dass die Liste der anderen Elemente springt.
 local function page(name, index)
-	local t = makeButton(name, CARD)
-	t.Size, t.LayoutOrder, t.TextSize = UDim2.new(1 / 7, -3, 1, 0), index, 11
-	t.Parent = tabBar
+	local t = Instance.new("TextButton")
+	t.LayoutOrder, t.Text, t.BackgroundTransparency, t.AutoButtonColor = index, name, 1, false
+	t.Size, t.AutomaticSize = UDim2.fromScale(0, 1), Enum.AutomaticSize.X
+	t.FontFace, t.TextSize, t.TextColor3, t.ZIndex = FONT.bold, 12, MUTED, 2
+	local pad = Instance.new("UIPadding", t)
+	pad.PaddingLeft, pad.PaddingRight = UDim.new(0, 3), UDim.new(0, 3)
+	t.Parent = tabBar.Track
 	t.Activated:Connect(function() showTab(name) end)
 	tabs[name] = t
-	local p = autoFrame()
-	vlist(p, 10)
+	local holder = autoFrame()
 	container = root
-	add(p)
+	add(holder)
+	local p = autoFrame()
+	vlist(p, 12)
+	p.Parent = holder
 	pages[name] = p
 	container, currentPage = p, p
 	return p
@@ -372,8 +476,8 @@ local transferLabel = label("")
 page("FX", 5)
 card("ClientFX", "Effekte, die der Server per ClientFX an die Clients schickt und die ein Client-Script zeichnet.")
 local fxScanBtn = button("ClientFX suchen", ACCENT,
-	"Durchsucht alle Scripts der offenen Place nach ClientFX-Aufrufen wie ClientFX:FireAllClients(\"Stand Barrage\", ...).\n\nZu jedem Effekt siehst du, wo der Server ihn feuert (Server) und wo ein Client-Script ihn behandelt (Client). Klick darauf öffnet das Script an der Zeile.\n\nRot heißt: In dieser Place gibt es keinen Client-Code dafür. Vorlage legt dann ein LocalScript an, das schon auf den Effekt hört und die Parameter vom Server auflistet.\n\nPaket speichert alles zum Effekt (Scripts, passende Objekte, Assets) nach downloads/<Name>/.\n\nTesten: Siehe Karte Aufnahme unten. Im Play-Test die Attacke einmal benutzen, dann Wiederholen.")
-label("Name des RemoteEvents (in YBA: ClientFX)")
+	"Durchsucht alle Scripts der offenen Place nach Effekt-Aufrufen wie ClientFX:FireAllClients(\"Stand Barrage\", ...).\n\nJedes Spiel nennt sein Remote anders. Gibt es unter dem eingetragenen Namen nichts, probiert das Plugin jedes RemoteEvent der Place und nimmt das mit den meisten Effekten.\n\nZu jedem Effekt siehst du, wo der Server ihn feuert (Server) und wo ein Client-Script ihn behandelt (Client). Klick darauf öffnet das Script an der Zeile.\n\nRot heißt: In dieser Place gibt es keinen Client-Code dafür. Vorlage legt dann ein LocalScript an, das schon auf den Effekt hört und die Parameter vom Server auflistet.\n\nPaket speichert alles zum Effekt (Scripts, passende Objekte, Assets) nach downloads/<Name>/.\n\nTesten: Siehe Karte Aufnahme unten. Im Play-Test die Attacke einmal benutzen, dann Wiederholen.")
+label("Name des Effekt-RemoteEvents. Leer lassen oder falsch: das Plugin findet es beim Suchen selbst.")
 local fxRemoteBox = input("ClientFX")
 fxRemoteBox.Text = plugin:GetSetting("fxRemote") or "ClientFX"
 fxRemoteBox.FocusLost:Connect(function() plugin:SetSetting("fxRemote", fxRemoteBox.Text) end)
@@ -415,20 +519,47 @@ local _, csDownloadBtn, csRepairBtn = buttonRow("Mein Account: lädt vorher jede
 do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze von 200
 	page("Credits", 7)
 	card("Credits entfernen", "Entfernt in der ganzen Place Dekompilier-Hinweise, Discord-Links, Credits und Lizenzen.")
-	local creditsBtn = button("Credits löschen", ACCENT, "Script-Code: löscht jeden Kommentar, in dem Credits, Lizenzen, Discord, Decompiler-Hinweise (Saved by, Script path, Decompile time, -- Line:, -- upvalues:) oder Copyright stehen. Discord-Links in Strings fliegen auch raus. Der restliche Code bleibt, wie er ist.\n\nObjekte (VFX, Models, GUIs): Discord-Links und „Made by …“ aus Namen, Texten und Attributen. StringValues und Scripts, die nur Credits enthalten (Credits, ReadMe, License), werden gelöscht.\n\nZum Bestätigen zweimal klicken. Strg+Z macht alles rückgängig.")
+	local creditsBtn = button("Credits löschen", BAD, "Script-Code: löscht jeden Kommentar, in dem Credits, Lizenzen, Discord, Decompiler-Hinweise (Saved by, Script path, Decompile time, -- Line:, -- upvalues:) oder Copyright stehen. Discord-Links in Strings fliegen auch raus. Der restliche Code bleibt, wie er ist.\n\nObjekte (VFX, Models, GUIs): Discord-Links und „Made by …“ aus Namen, Texten und Attributen. StringValues und Scripts, die nur Credits enthalten (Credits, License), werden gelöscht. README-Scripts immer, auch das von SaveInstance direkt unter game.\n\nZum Bestätigen zweimal klicken. Strg+Z macht alles rückgängig.")
 	local creditsLabel = label("")
+
+	card("Kamera reparieren", "Wenn die Kamera nach dem Laden einer kopierten Place festhängt.")
+	local _, cameraBtn, cameraNewBtn = buttonRow("Zurücksetzen: CameraType auf Fixed (so braucht Studio sie beim Bearbeiten), CameraSubject leer, Sichtfeld 70. Gespeicherte Places haben oft die Kamera vom Spiel mit CameraType Scriptable, dann bewegt sie sich nicht.\n\nNeu anlegen: löscht die Kamera, Studio legt sofort eine frische an. Für den Fall, dass Zurücksetzen nicht reicht.",
+		"Zurücksetzen", ACCENT, "Neu anlegen", GREY)
+	local cameraLabel = label("")
+	cameraBtn.Activated:Connect(function()
+		local cam = workspace.CurrentCamera
+		cam.CameraType, cam.CameraSubject, cam.FieldOfView = Enum.CameraType.Fixed, nil, 70
+		cameraLabel.TextColor3, cameraLabel.Text = OK, "Kamera zurückgesetzt. Hängt sie noch: Neu anlegen."
+	end)
+	cameraNewBtn.Activated:Connect(function()
+		local old = workspace.CurrentCamera
+		old:Destroy()
+		-- Studio legt die neue Kamera erst nach ein paar Frames an.
+		local t0 = os.clock()
+		while (workspace.CurrentCamera == old or not workspace.CurrentCamera) and os.clock() - t0 < 1 do task.wait() end
+		local ok = workspace.CurrentCamera ~= old and workspace.CurrentCamera ~= nil
+		cameraLabel.TextColor3 = ok and OK or BAD
+		cameraLabel.Text = ok and "Neue Kamera angelegt." or "Keine Kamera mehr da. Studio neu laden."
+	end)
 
 	-- Kleingeschrieben gesucht, als Lua-Muster. Ein Treffer in einem Kommentar löscht den ganzen Kommentar.
 	local COMMENT_MARKERS = { "discord", "saved by", "saveinstance", "decompil", "script path:", "filteringenabled",
 		"sourceassetid", "source from the asset", "join to copy", "credit", "made by", "created by", "scripted by",
 		"written by", "modeled by", "author", "©", "copyright", "%(c%) %d", "licen[sc]e", "permission is hereby granted",
-		"all rights reserved", "spdx", "https?://", "original asset", "original module", "^%-%-%s*line: %d", "^%-%-%s*upvalues:", "^%-%-%s*types:" }
+		"all rights reserved", "spdx", "https?://", "original asset", "original module", "^%-%-%s*line: %d", "^%-%-%s*upvalues:", "^%-%-%s*types:",
+		-- Kopfzeilen anderer Decompiler und Saver (Konstant, Synapse, Medal, Oracle, unluau, Dex …)
+		"luau version", "types version", "time taken:", "decompiled on", "script hash", "bytecode", "disassembl",
+		"executor:", "synapse", "konstant", "unluau", "oracle", "medal", "%f[%a]dex%f[%A]", "t%.me/", "guilded%.gg" }
 	-- Für Namen, Texte und Werte strenger: dort heißt „Credits“ oft Spielwährung, und „created by your stand“ ist Spieltext.
 	local TEXT_MARKERS = { "discord", "^%s*made by", "^%s*created by", "^%s*scripted by", "^%s*credits? to", "join to copy",
-		"saveinstance", "decompil" }
-	local CREDIT_NAMES = { credits = true, credit = true, readme = true, ["read me"] = true, license = true, licence = true, author = true }
+		"saveinstance", "decompil", "t%.me/", "guilded%.gg/" }
+	-- Namen ohne Leer- und Sonderzeichen kleingeschrieben: "!README!", "Read_Me", "CREDITS.txt" treffen alle.
+	local CREDIT_NAMES = { credits = true, credit = true, creditstxt = true, license = true, licence = true, licensetxt = true,
+		author = true, authors = true }
+	local function plainName(name) return (name:lower():gsub("[^%w]", "")) end
 	local LINKS = { "https?://[%w%.]*discord%.gg/[%w%-_]*", "discord%.gg/[%w%-_]*",
-		"https?://[%w%.]*discord%w*%.com/invite/[%w%-_]*", "discord%w*%.com/invite/[%w%-_]*" }
+		"https?://[%w%.]*discord%w*%.com/invite/[%w%-_]*", "discord%w*%.com/invite/[%w%-_]*",
+		"https?://t%.me/[%w%-_/]*", "https?://[%w%.]*guilded%.gg/[%w%-_/]*" }
 
 	local function matchesAny(text, markers)
 		local low = text:lower()
@@ -436,6 +567,50 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			if low:find(m) then return true end
 		end
 		return false
+	end
+
+	-- Credit-Sätze in Texten, die Spieler lesen (Item-Beschreibungen, GUIs). Lua-Muster auf dem kleingeschriebenen Satz.
+	-- Nur eindeutige Formen: "made by dwarves" mitten in Spieltext bleibt, "Made by X." als eigener Satz geht.
+	local CREDIT_SENTENCE = { "^%s*credits?%f[%A]", "credits? to%f[%A]", "credits?%s*:", "^%s*made by", "^%s*thanks to",
+		"^%s*huge thanks", "^%s*special thanks", "thanks to @", "made by @", "by @[%w_]", "artpiece", "artwork by", "art by",
+		"sprite work by", "concept by", "modell?ed by", "animated by", "music by", "song by", "animation made by",
+		"model made by", "map made by", "originally made by", "edited by", "edit by" }
+
+	-- Schneidet Credit-Sätze aus einem Text. Sätze enden an Zeilenumbrüchen (echt oder als \n im Code) und an ". ! ?".
+	-- Endet ein Credit-Satz mit ":", ist er eine Überschrift ("Credits:"), dann geht alles danach mit.
+	local function stripCredits(text)
+		local lower = text:lower()
+		if not (lower:find("credit", 1, true) or lower:find("thanks", 1, true) or lower:find(" by", 1, true)
+			or lower:find("artpiece", 1, true) or lower:find("^made by")) then
+			return text, 0
+		end
+		local marked = text:gsub("\\n", "\\n\1"):gsub("\n", "\n\1"):gsub("([%.!%?]+%s)", "%1\1")
+		local kept, count = {}, 0
+		for piece in (marked .. "\1"):gmatch("([^\1]*)\1") do
+			local low = piece:lower()
+			local first = nil
+			for _, m in CREDIT_SENTENCE do
+				local p = low:find(m)
+				if p and (not first or p < first) then first = p end
+			end
+			if first then
+				count += 1
+				-- "GOAT | Pose Credit: …" behält "GOAT": zurück bis zum letzten Trenner. Ohne Trenner geht der ganze Satz.
+				local prefix = piece:sub(1, first - 1):match("^(.*)[|;,%(%[]") or piece:sub(1, first - 1):match("^(.*)%s%-%s")
+				if prefix and prefix:find("%w") then table.insert(kept, (prefix:gsub("[%s|%-,:;]+$", ""))) end
+				if piece:gsub("\\n", ""):match(":%s*$") then break end
+			else
+				table.insert(kept, piece)
+			end
+		end
+		if count == 0 then return text, 0 end
+		-- Übrige Leerzeichen und \n am Ende weg, sonst endet "I'LL CRUSH YOU!!!\n\n" mit Leerzeilen.
+		local result, before = table.concat(kept), nil
+		repeat
+			before = result
+			result = result:gsub("%s+$", ""):gsub("\\n$", "")
+		until result == before
+		return result, count
 	end
 
 	local function stripLinks(text)
@@ -448,12 +623,31 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 		return text, count
 	end
 
-	-- Geht den Code einmal durch, damit -- in einem String nicht als Kommentar zählt. Gibt (Code, Kommentare, Links).
+	-- Geht den Code einmal durch, damit -- in einem String nicht als Kommentar zählt. Gibt (Code, Kommentare, Links, Credit-Sätze).
 	local function cleanSource(src)
-		local out, i, n, comments, links = {}, 1, #src, 0, 0
+		local out, i, n, comments, links, credits = {}, 1, #src, 0, 0, 0
 		local function keep(s)
 			local cleaned, c = stripLinks(s)
 			links += c
+			-- Credit-Sätze nur im Inneren von "…", '…' und [[…]]; `…` nicht, dort könnten {Ausdrücke} zerschnitten werden.
+			local open, body, close = nil, nil, nil
+			local q = cleaned:sub(1, 1)
+			if (q == '"' or q == "'") and #cleaned >= 2 and cleaned:sub(-1) == q then
+				open, body, close = q, cleaned:sub(2, -2), q
+			else
+				local eq = cleaned:match("^%[(=*)%[")
+				if eq and cleaned:sub(-(#eq + 2)) == "]" .. eq .. "]" then
+					open, body, close = "[" .. eq .. "[", cleaned:sub(#eq + 3, -(#eq + 3)), "]" .. eq .. "]"
+				end
+			end
+			if body then
+				local stripped, k = stripCredits(body)
+				-- Endet der Rest auf \, würde er das schließende Anführungszeichen schlucken: dann lieber nichts ändern.
+				if k > 0 and not stripped:match("\\$") then
+					credits += k
+					cleaned = open .. stripped .. close
+				end
+			end
 			table.insert(out, cleaned)
 		end
 		while i <= n do
@@ -507,13 +701,15 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 				i = j + 1
 			end
 		end
-		return (table.concat(out):gsub("^[ \t\r\n]*\n", "")), comments, links
+		return (table.concat(out):gsub("^[ \t\r\n]*\n", "")), comments, links, credits
 	end
 
 	local function cleanPlace()
-		local r = { scripts = 0, comments = 0, links = 0, objects = 0, deleted = 0 }
+		local r = { scripts = 0, comments = 0, links = 0, credits = 0, objects = 0, deleted = 0, skipped = 0 }
 		local doomed, all = {}, {}
 		for _, svc in game:GetChildren() do
+			-- SaveInstance legt sein README direkt unter game, nicht in einen Dienst.
+			if svc:IsA("LuaSourceContainer") or svc:IsA("ValueBase") then table.insert(all, svc) end
 			-- CoreGui hält Studios und dieses Plugin-Fenster, das nicht anfassen.
 			local ok, list = pcall(function() return svc.ClassName ~= "CoreGui" and svc:GetDescendants() or {} end)
 			if ok then table.move(list, 1, #list, #all + 1, all) end
@@ -521,13 +717,25 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 		for count, obj in all do
 			if count % 500 == 0 then task.wait() end
 			pcall(function()
-				local isCreditName = CREDIT_NAMES[obj.Name:lower()]
+				local isCreditName = CREDIT_NAMES[plainName(obj.Name)]
+				local isReadme = plainName(obj.Name):match("^readme") ~= nil -- README, !README!, Read_Me, README.txt, ReadMeFirst
 				local changed = false
+				if isReadme and (obj:IsA("LuaSourceContainer") or obj:IsA("ValueBase")) then
+					table.insert(doomed, obj) -- READMEs immer weg, egal was drinsteht
+					return
+				end
 				if obj:IsA("LuaSourceContainer") then
 					local src = obj.Source
-					local cleaned, comments, links = cleanSource(src)
+					local cleaned, comments, links, credits = cleanSource(src)
 					if isCreditName and not cleaned:find("%S") then
 						table.insert(doomed, obj)
+						return
+					end
+					-- Sicherheitsnetz für jedes Spiel: kompilierte der Code vorher und danach nicht mehr, bleibt er, wie er war.
+					local okBefore, before = pcall(loadstring, src)
+					local okAfter, after = pcall(loadstring, cleaned)
+					if cleaned ~= src and okBefore and before and not (okAfter and after) then
+						r.skipped += 1
 						return
 					end
 					if cleaned ~= src then
@@ -536,16 +744,22 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 						r.scripts += 1
 						r.comments += comments
 						r.links += links
+						r.credits += credits
 					end
 				elseif obj:IsA("StringValue") and (isCreditName or matchesAny(obj.Value, TEXT_MARKERS)) then
 					table.insert(doomed, obj)
 					return
+				elseif obj:IsA("StringValue") then
+					local text, k = stripCredits(obj.Value)
+					if k > 0 then obj.Value, changed, r.credits = text, true, r.credits + k end
 				elseif obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
 					if matchesAny(obj.Text, TEXT_MARKERS) then
 						local text = stripLinks(obj.Text)
 						obj.Text = matchesAny(text, TEXT_MARKERS) and "" or text
 						changed = true
 					end
+					local text, k = stripCredits(obj.Text)
+					if k > 0 then obj.Text, changed, r.credits = text, true, r.credits + k end
 				end
 				if matchesAny(obj.Name, TEXT_MARKERS) then
 					local name = stripLinks(obj.Name)
@@ -553,9 +767,12 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					changed = true
 				end
 				for key, value in obj:GetAttributes() do
-					if CREDIT_NAMES[key:lower()] or (type(value) == "string" and matchesAny(value, TEXT_MARKERS)) then
+					if CREDIT_NAMES[plainName(key)] or (type(value) == "string" and matchesAny(value, TEXT_MARKERS)) then
 						obj:SetAttribute(key, nil)
 						changed = true
+					elseif type(value) == "string" then
+						local text, k = stripCredits(value)
+						if k > 0 then obj:SetAttribute(key, text) changed, r.credits = true, r.credits + k end
 					end
 				end
 				if changed then r.objects += 1 end
@@ -587,8 +804,9 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 		creditsBtn.Active, creditsBtn.Text = true, "Credits löschen"
 		if ok then
 			creditsLabel.TextColor3 = OK
-			creditsLabel.Text = ("%d Scripts bereinigt (%d Kommentare, %d Links), %d Objekte geändert, %d gelöscht. Strg+Z macht es rückgängig.")
-				:format(r.scripts, r.comments, r.links, r.objects, r.deleted)
+			creditsLabel.Text = ("%d Scripts bereinigt (%d Kommentare, %d Links, %d Credit-Sätze), %d Objekte geändert, %d gelöscht.%s Strg+Z macht es rückgängig.")
+				:format(r.scripts, r.comments, r.links, r.credits, r.objects, r.deleted,
+					r.skipped > 0 and (" %d Scripts nicht angefasst, sie wären sonst kaputt gegangen."):format(r.skipped) or "")
 		else
 			creditsLabel.TextColor3, creditsLabel.Text = BAD, "Fehler: " .. tostring(r)
 		end
@@ -973,7 +1191,7 @@ local bulkSource, cartSource
 local function listButton(text, parent)
 	local b = makeButton(text, FIELD)
 	b.Parent = parent
-	b.Font, b.TextSize = Enum.Font.Gotham, 13
+	b.FontFace, b.TextSize = FONT.medium, 13
 	b.TextXAlignment, b.TextTruncate = Enum.TextXAlignment.Left, Enum.TextTruncate.AtEnd
 	Instance.new("UIPadding", b).PaddingLeft = UDim.new(0, 8)
 	return b
@@ -1227,9 +1445,9 @@ local function scanFx()
 	end
 	-- 1. Server-Seite: X:FireAllClients("Name", …) bzw. X:FireClient(spieler, "Name", …), wobei X ClientFX ist
 	-- oder eine Variable, der ClientFX zugewiesen wurde (dekompilierter Code: v21 = ClientFX). Auch über mehrere Zeilen.
+	local function scanRemote(remote)
 	for _, s in scripts do
 		local src = s[2]
-		local remote = remoteName()
 		if src:find(remote, 1, true) then
 			local aliases = { [remote] = true }
 			for a in src:gmatch("([%w_]+)%s*=%s*" .. remote:gsub("%p", "%%%0") .. "%f[^%w_]") do aliases[a] = true end
@@ -1255,6 +1473,30 @@ local function scanFx()
 					table.insert(fx[name].server, { s[1], line })
 				end
 			end
+		end
+	end
+	end
+	scanRemote(remoteName())
+	-- Jedes Spiel nennt sein Effekt-Remote anders (YBA: ClientFX). Ohne Treffer jedes RemoteEvent probieren
+	-- und das mit den meisten Effekten nehmen; der Name landet im Feld, damit Aufnahme und Vorlage ihn kennen.
+	if next(fx) == nil then
+		local best, bestCount, tried = nil, 0, {}
+		for _, obj in game:GetDescendants() do
+			local ok, isRemote = pcall(function() return obj:IsA("RemoteEvent") end)
+			if ok and isRemote and not tried[obj.Name] then
+				tried[obj.Name] = true
+				fx = {}
+				scanRemote(obj.Name)
+				local n = 0
+				for _ in fx do n += 1 end
+				if n > bestCount then best, bestCount = obj.Name, n end
+			end
+		end
+		fx = {}
+		if best then
+			fxRemoteBox.Text = best
+			plugin:SetSetting("fxRemote", best)
+			scanRemote(best)
 		end
 	end
 	-- 2. Client-Seite: Name als String in einem LocalScript/ModuleScript (ohne Fire), oder ein Modul mit dem Namen.
@@ -2488,7 +2730,7 @@ if RunService:IsRunning() and RunService:IsClient() then
 			for i = 2, args.n do table.insert(details, describe(args[i])) end
 			local info = Instance.new("TextLabel")
 			info.Size, info.AutomaticSize, info.BackgroundTransparency = UDim2.new(1, 0, 0, 0), Enum.AutomaticSize.Y, 1
-			info.Font, info.TextSize, info.TextColor3, info.TextWrapped = Enum.Font.Code, 11, MUTED, true
+			info.FontFace, info.TextSize, info.TextColor3, info.TextWrapped = FONT.mono, 11, MUTED, true
 			info.TextXAlignment, info.LayoutOrder = Enum.TextXAlignment.Left, 2
 			info.Text = #details > 0 and table.concat(details, "\n") or "(keine Daten)"
 			info.Parent = entry
@@ -2498,5 +2740,311 @@ if RunService:IsRunning() and RunService:IsClient() then
 				if old:IsA("GuiObject") and old.LayoutOrder > -count + 39 then old:Destroy() end -- ältere haben größere Werte
 			end
 		end)
+	end)
+end
+
+-- Tab: Upload ------------------------------------------------------------------------------
+-- Fremde Animationen, Sounds und Meshes spielen in deinem Spiel nicht, weil sie einem anderen Account gehören.
+-- Der Server lädt sie per Open Cloud unter deinem Account neu hoch, das Plugin tauscht die IDs überall.
+do -- eigener Block am Dateiende: braucht reupload() und TEXTURE_PROPS von weiter oben
+	local KINDS = { { "Animation", "Animationen" }, { "Sound", "Sounds" }, { "Mesh", "Meshes" }, { "Bild", "Bilder" } }
+	-- Asset-Typ vom Server auf unsere Art. Decals zählen als Bild.
+	local KIND_OF_TYPE = { Animation = "Animation", Audio = "Sound", Mesh = "Mesh", MeshPart = "Mesh", Image = "Bild", Decal = "Bild" }
+	local ROBLOX_USER = 1 -- Assets von Roblox selbst darf jedes Spiel benutzen
+	local BATCH = 100 -- IDs pro Anfrage an den Server, damit keine Anfrage in den Zeitlimit läuft
+	local WORKERS = 3 -- gleichzeitige Uploads
+	-- Eigenschaften mit einer Asset-ID: Klasse = { {Eigenschaft, Art} }
+	local FIELDS = {
+		Animation = { { "AnimationId", "Animation" } },
+		Sound = { { "SoundId", "Sound" } },
+		MeshPart = { { "MeshId", "Mesh" }, { "TextureID", "Bild" } },
+		SpecialMesh = { { "MeshId", "Mesh" }, { "TextureId", "Bild" } },
+		FileMesh = { { "MeshId", "Mesh" }, { "TextureId", "Bild" } },
+		ImageLabel = { { "Image", "Bild" } },
+		ImageButton = { { "Image", "Bild" } },
+		Sky = { { "SkyboxBk", "Bild" }, { "SkyboxDn", "Bild" }, { "SkyboxFt", "Bild" }, { "SkyboxLf", "Bild" },
+			{ "SkyboxRt", "Bild" }, { "SkyboxUp", "Bild" }, { "SunTextureId", "Bild" }, { "MoonTextureId", "Bild" } },
+	}
+	for class, prop in TEXTURE_PROPS do FIELDS[class] = FIELDS[class] or { { prop, "Bild" } } end
+	local ID_IN_TEXT = "%f[%d](%d%d%d%d%d%d%d+)%f[%D]" -- 7 und mehr Stellen, kürzere Zahlen sind keine Roblox-IDs
+
+	page("Upload", 8)
+	pages.Upload.Parent.Visible = false -- showTab("Laden") lief schon, bevor es diesen Tab gab
+	card("Auf meinen Account", "Fremde Animationen, Sounds und Meshes spielen in deinem Spiel nicht. Lädt sie unter deinem Account neu hoch und setzt die neuen IDs überall ein.")
+	local _, placeBtn, selBtn = buttonRow("Ganze Place: alles in Workspace, ReplicatedStorage, StarterGui, den Scripts usw.\n\nNur Auswahl: nur die im Explorer markierten Objekte und alles darin.",
+		"Ganze Place", ACCENT, "Nur Auswahl", GREY)
+	local kindRow = add(Instance.new("Frame"))
+	kindRow.Size, kindRow.BackgroundTransparency = UDim2.new(1, 0, 0, 30), 1
+	local kindLayout = Instance.new("UIListLayout", kindRow)
+	kindLayout.FillDirection, kindLayout.Padding, kindLayout.SortOrder = Enum.FillDirection.Horizontal, UDim.new(0, 6), Enum.SortOrder.LayoutOrder
+	kindLayout.HorizontalFlex = Enum.UIFlexAlignment.Fill
+	local wanted = {}
+	for i, k in KINDS do
+		local b = makeButton(k[2], ACCENT)
+		b.Size, b.LayoutOrder, b.TextSize = UDim2.new(0, 10, 1, 0), i, 12
+		wanted[k[1]] = true
+		b.Activated:Connect(function()
+			wanted[k[1]] = not wanted[k[1]]
+			b.BackgroundColor3 = wanted[k[1]] and ACCENT or GREY
+		end)
+		b.Parent = kindRow
+	end
+	local _, scanBtn, uploadBtn = buttonRow("Suchen: findet jede Asset-ID in Eigenschaften (AnimationId, SoundId, MeshId, Texturen, Bilder, Himmel), im Code aller Scripts, in StringValues, Zahlen-Werten und Attributen. Fragt Roblox nach Typ und Besitzer. Übersprungen wird, was dir schon gehört oder von Roblox selbst ist.\n\nHochladen: lädt jedes fremde Asset der gewählten Arten unter deinem Account neu hoch (Open Cloud, apikey.txt) und tauscht die alte ID überall gegen die neue, auch im Code. Schon hochgeladene IDs merkt sich das Plugin und lädt sie nie doppelt hoch. Strg+Z macht den Tausch rückgängig.\n\nAb 20 Assets fragt der Knopf nach: zweimal klicken. Während des Hochladens wird er rot und heißt Abbrechen: ein Klick stoppt, was schon hochgeladen ist, wird trotzdem getauscht.\n\nGrenzen von Roblox: Sounds 10 pro Monat ohne ID-Verifizierung, 100 mit. Models lädt es nicht neu hoch.",
+		"Suchen", GREY, "Hochladen", ACCENT)
+	local upInfo = label("Erst Suchen drücken.")
+	local upList = add(autoFrame())
+	vlist(upList, 4)
+
+	local useSelection = false
+	placeBtn.Activated:Connect(function()
+		useSelection = false
+		placeBtn.BackgroundColor3, selBtn.BackgroundColor3 = ACCENT, GREY
+	end)
+	selBtn.Activated:Connect(function()
+		useSelection = true
+		placeBtn.BackgroundColor3, selBtn.BackgroundColor3 = GREY, ACCENT
+	end)
+
+	local function scopeInstances()
+		local list = {}
+		for _, r in useSelection and Selection:Get() or game:GetChildren() do
+			-- Direkt unter game zählen nur Scripts und Werte, Dienste selbst haben keine IDs.
+			if useSelection or r:IsA("LuaSourceContainer") or r:IsA("ValueBase") then table.insert(list, r) end
+			local ok, d = pcall(function() return r.ClassName ~= "CoreGui" and r:GetDescendants() or {} end)
+			if ok then table.move(d, 1, #d, #list + 1, list) end
+		end
+		return list
+	end
+
+	local function idOf(value)
+		local s = tostring(value)
+		return s:match("rbxassetid://(%d+)") or s:match("[?&][iI][dD]=(%d+)") or s:match("^%s*(%d+)%s*$")
+	end
+
+	-- Jede Stelle, an der eine ID steht: { obj, prop | text | attr, number }
+	local function findUses()
+		local uses, known = {}, {}
+		local function use(id, entry, kind)
+			if #id < 5 or #id > 15 then return end
+			uses[id] = uses[id] or {}
+			table.insert(uses[id], entry)
+			if kind then known[id] = known[id] or kind end
+		end
+		for i, obj in scopeInstances() do
+			if i % 2000 == 0 then task.wait() end
+			pcall(function()
+				for _, f in FIELDS[obj.ClassName] or {} do
+					local id = idOf(obj[f[1]])
+					if id then use(id, { obj = obj, prop = f[1] }, f[2]) end
+				end
+				if obj:IsA("CharacterMesh") and obj.MeshId > 0 then
+					use(("%d"):format(obj.MeshId), { obj = obj, prop = "MeshId", number = true }, "Mesh")
+				end
+				local text = obj:IsA("LuaSourceContainer") and obj.Source or (obj:IsA("StringValue") and obj.Value) or nil
+				if text then
+					local seen = {}
+					for id in text:gmatch(ID_IN_TEXT) do
+						if not seen[id] then
+							seen[id] = true
+							use(id, { obj = obj, text = true })
+						end
+					end
+				end
+				if (obj:IsA("IntValue") or obj:IsA("NumberValue")) and obj.Value >= 1e6 and obj.Value % 1 == 0 then
+					use(("%d"):format(obj.Value), { obj = obj, prop = "Value", number = true })
+				end
+				for key, v in obj:GetAttributes() do
+					if type(v) == "string" then
+						for id in v:gmatch(ID_IN_TEXT) do use(id, { obj = obj, attr = key }) end
+					elseif type(v) == "number" and v >= 1e6 and v % 1 == 0 then
+						use(("%d"):format(v), { obj = obj, attr = key, number = true })
+					end
+				end
+			end)
+		end
+		return uses, known
+	end
+
+	-- Typ und Besitzer jeder ID vom Server, in Paketen. Gibt { [id] = {name, type, creator} } oder nil, Fehler.
+	local function details(ids)
+		local out = {}
+		for i = 1, #ids, BATCH do
+			upInfo.Text = ("Frage Roblox nach %d/%d IDs …"):format(math.min(i + BATCH - 1, #ids), #ids)
+			local body = table.concat(ids, ",", i, math.min(i + BATCH - 1, #ids))
+			local ok, res = pcall(HttpService.RequestAsync, HttpService,
+				{ Url = SERVER .. "/api/plugin-bulk", Headers = PLUGIN_HEADERS, Method = "POST", Body = body })
+			if not ok or not res.Success then return nil, "Server nicht erreichbar. start.bat starten." end
+			for _, item in HttpService:JSONDecode(res.Body) do out[item.id] = item end
+		end
+		return out
+	end
+
+	local scan = nil -- { uses, items = { [id] = {kind, name, skip} } }
+
+	local function showScan()
+		for _, old in upList:GetChildren() do
+			if old:IsA("GuiObject") then old:Destroy() end
+		end
+		local map = plugin:GetSetting("repaired") or {}
+		local count, skipped, uploaded = {}, 0, 0
+		local rows = {}
+		for id, item in scan.items do
+			if item.skip then
+				skipped += 1
+			else
+				count[item.kind] = (count[item.kind] or 0) + 1
+				if map[id] then uploaded += 1 end
+				table.insert(rows, { id = id, item = item })
+			end
+		end
+		local parts = {}
+		for _, k in KINDS do table.insert(parts, ("%s %d"):format(k[2], count[k[1]] or 0)) end
+		upInfo.TextColor3 = TEXT
+		upInfo.Text = ("Fremd: %s.\n%d schon hochgeladen, %d übersprungen (deine oder von Roblox)."):format(table.concat(parts, ", "), uploaded, skipped)
+		if (count.Sound or 0) > 10 then
+			upInfo.Text ..= "\nAchtung: Roblox erlaubt ohne ID-Verifizierung nur 10 Sounds im Monat."
+		end
+		table.sort(rows, function(a, b) return a.item.kind < b.item.kind end)
+		for i, r in rows do
+			if i > 60 then break end -- shortcut: Liste zeigt 60 Zeilen, hochgeladen wird trotzdem alles
+			local b = listButton(("%s  ·  %s%s"):format(r.item.kind, r.item.name, map[r.id] and "  ·  schon hochgeladen" or ""), upList)
+			b.LayoutOrder = i
+			local obj = scan.uses[r.id][1].obj
+			b.Activated:Connect(function() Selection:Set({ obj }) end)
+		end
+	end
+
+	scanBtn.Activated:Connect(function()
+		if not scanBtn.Active then return end
+		scanBtn.Active, scanBtn.Text = false, "Suche …"
+		local uses, known = findUses()
+		local ids = {}
+		for id in uses do table.insert(ids, id) end
+		local info, err = details(ids)
+		scanBtn.Active, scanBtn.Text = true, "Suchen"
+		if not info then
+			upInfo.TextColor3, upInfo.Text = BAD, err
+			return
+		end
+		local me = game:GetService("StudioService"):GetUserId()
+		local items = {}
+		for id in uses do
+			local d = info[id] or {}
+			-- Zahlen im Code ohne bekannten Asset-Typ sind keine Assets (Place-IDs, Zeiten, Preise).
+			local kind = KIND_OF_TYPE[d.type or ""] or (d.type == "" and known[id]) or nil
+			if kind then
+				items[id] = { kind = kind, name = d.name or id, skip = d.creator == me or d.creator == ROBLOX_USER }
+			end
+		end
+		scan = { uses = uses, items = items }
+		showScan()
+	end)
+
+	-- Setzt die neue ID an jeder Stelle ein. Gibt (Stellen, Fehlerzeilen).
+	local function swapIds(map)
+		local done, fails, scripts = 0, {}, {}
+		local function inText(text, old, new) return (text:gsub("%f[%d]" .. old .. "%f[%D]", new)) end
+		for id, item in scan.items do
+			local new = map[id]
+			if new and wanted[item.kind] and not item.skip then
+				for _, u in scan.uses[id] do
+					local obj = u.obj
+					local ok, err = pcall(function()
+						if u.text and obj:IsA("LuaSourceContainer") then
+							scripts[obj] = scripts[obj] or {} -- Code einmal pro Script schreiben, nicht pro ID
+							scripts[obj][id] = new
+						elseif u.text then
+							obj.Value = inText(obj.Value, id, new)
+						elseif u.attr then
+							obj:SetAttribute(u.attr, u.number and tonumber(new) or inText(obj:GetAttribute(u.attr), id, new))
+						elseif u.number then
+							obj[u.prop] = tonumber(new)
+						elseif obj:IsA("MeshPart") and u.prop == "MeshId" then
+							-- MeshId ist für Plugins schreibgeschützt: neues Mesh laden und per ApplyMesh übernehmen.
+							local fresh = AssetService:CreateMeshPartAsync(Content.fromAssetId(tonumber(new)))
+							obj:ApplyMesh(fresh)
+							fresh:Destroy()
+						else
+							obj[u.prop] = "rbxassetid://" .. new
+						end
+					end)
+					if ok then done += 1 elseif #fails < 8 then table.insert(fails, ("%s: %s"):format(obj.Name, tostring(err))) end
+				end
+			end
+		end
+		for s, swaps in scripts do
+			local ok, err = pcall(function()
+				game:GetService("ScriptEditorService"):UpdateSourceAsync(s, function(src)
+					for old, new in swaps do src = inText(src, old, new) end
+					return src
+				end)
+			end)
+			if ok then done += 1 elseif #fails < 8 then table.insert(fails, ("%s: %s"):format(s.Name, tostring(err))) end
+		end
+		return done, fails
+	end
+
+	local uploading, cancelled, confirmUntil = false, false, 0
+	uploadBtn.Activated:Connect(function()
+		if uploading then
+			-- Derselbe Knopf bricht ab: laufende Uploads werden fertig, neue starten nicht mehr.
+			cancelled = true
+			uploadBtn.Text = "Breche ab …"
+			return
+		end
+		if not scan then
+			upInfo.TextColor3, upInfo.Text = BAD, "Erst Suchen drücken."
+			return
+		end
+		local map = plugin:GetSetting("repaired") or {}
+		local todo, errors = {}, {}
+		for id, item in scan.items do
+			if wanted[item.kind] and not item.skip and not map[id] then table.insert(todo, id) end
+		end
+		-- Ab 20 Assets erst nach zweitem Klick, damit nicht aus Versehen Tausende hochgehen.
+		if #todo >= 20 and os.clock() > confirmUntil then
+			confirmUntil = os.clock() + 5
+			uploadBtn.Text = ("%d hochladen? Nochmal klicken"):format(#todo)
+			task.delay(5, function()
+				if not uploading then uploadBtn.Text = "Hochladen" end
+			end)
+			return
+		end
+		confirmUntil, uploading, cancelled = 0, true, false
+		uploadBtn.BackgroundColor3, uploadBtn.Text = BAD, ("Abbrechen  ·  0/%d"):format(#todo)
+		local nextIndex, finished, running = 0, 0, WORKERS
+		for _ = 1, WORKERS do
+			task.spawn(function()
+				while not cancelled and nextIndex < #todo do
+					nextIndex += 1
+					local id = todo[nextIndex]
+					local newId, err = reupload(id)
+					if newId then map[id] = tostring(newId) else table.insert(errors, ("%s %s: %s"):format(scan.items[id].kind, scan.items[id].name, err)) end
+					finished += 1
+					-- Zwischendurch merken: auch nach Abbruch oder Studio-Absturz nie doppelt hochladen.
+					if finished % 10 == 0 then plugin:SetSetting("repaired", map) end
+					if not cancelled then uploadBtn.Text = ("Abbrechen  ·  %d/%d"):format(finished, #todo) end
+				end
+				running -= 1
+			end)
+		end
+		while running > 0 do task.wait(0.2) end
+		plugin:SetSetting("repaired", map)
+		uploadBtn.Text = "Tausche IDs …"
+		local rec = ChangeHistoryService:TryBeginRecording("Auf meinen Account: IDs tauschen")
+		local done, fails = swapIds(map)
+		if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+		uploading = false
+		uploadBtn.BackgroundColor3, uploadBtn.Text = ACCENT, "Hochladen"
+		local lines = { ("%s%d von %d hochgeladen, %d Stellen getauscht."):format(cancelled and "Abgebrochen. " or "",
+			finished - #errors, #todo, done) }
+		for i, e in errors do
+			if i > 6 then table.insert(lines, ("… und %d weitere Fehler."):format(#errors - 6)) break end
+			table.insert(lines, e)
+		end
+		for _, f in fails do table.insert(lines, "Tausch: " .. f) end
+		showScan()
+		upInfo.TextColor3 = (#errors == 0 and #fails == 0) and OK or BAD
+		upInfo.Text = table.concat(lines, "\n") .. "\n" .. upInfo.Text
 	end)
 end
