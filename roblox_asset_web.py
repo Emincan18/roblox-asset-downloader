@@ -8,10 +8,12 @@ neben diesem Script (siehe roblox_asset_downloader.py).
 """
 
 import csv
+import hashlib
 import io
 import json
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -112,16 +114,19 @@ UPLOAD_TYPES = {
 }
 
 
-def create_asset(key, asset_type, name, data, ext, ctype, user_id):
-    """Ein Asset per Open Cloud anlegen und warten, bis Roblox es verarbeitet hat. Gibt die neue ID."""
+def create_asset(asset_type, name, data, filename, ctype, user_id):
+    """Lädt Bytes per Open Cloud (apikey.txt) unter dem eigenen Account hoch. Gibt die neue Asset-ID."""
+    key = API_KEY_FILE.read_text("utf-8").strip() if API_KEY_FILE.is_file() else ""
+    if not key:
+        raise RuntimeError("apikey.txt fehlt. Siehe README: Hochladen einrichten")
     boundary = uuid.uuid4().hex
-    request = json.dumps({"assetType": asset_type, "displayName": name[:50], "description": name[:50],
+    request = json.dumps({"assetType": asset_type, "displayName": name[:50], "description": asset_type,
                           "creationContext": {"creator": {"userId": str(user_id)}}})
     body = (f'--{boundary}\r\nContent-Disposition: form-data; name="request"\r\n\r\n{request}\r\n'
-            f'--{boundary}\r\nContent-Disposition: form-data; name="fileContent"; filename="asset.{ext}"\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="fileContent"; filename="{filename}"\r\n'
             f'Content-Type: {ctype}\r\n\r\n').encode() + data + f"\r\n--{boundary}--\r\n".encode()
     op = open_cloud("assets", key, body, f"multipart/form-data; boundary={boundary}")
-    for _ in range(30):  # Roblox verarbeitet den Upload asynchron, Animationen und Meshes brauchen länger
+    for _ in range(30):  # Roblox verarbeitet den Upload asynchron
         if op.get("done"):
             break
         time.sleep(1)
@@ -129,16 +134,66 @@ def create_asset(key, asset_type, name, data, ext, ctype, user_id):
     if not op.get("done"):
         raise RuntimeError("Roblox braucht zu lange, gleich nochmal versuchen")
     if "response" not in op:
-        raise RuntimeError(f"Roblox lehnt ab: {json.dumps(op.get('error', op))[:200]}")
+        raise RuntimeError(f"Roblox hat den Upload abgelehnt: {json.dumps(op.get('error', op))[:200]}")
     return str(op["response"]["assetId"])
+
+
+# Schon hochgeladene Animationen (alte ID -> neue ID je User), damit nichts doppelt hochgeladen wird.
+UPLOADS_FILE = Path(__file__).with_name("uploads.json")
+UPLOADS_LOCK = threading.Lock()  # das Plugin lädt mehrere gleichzeitig hoch
+
+
+def known_upload(cache_key):
+    with UPLOADS_LOCK:
+        try:
+            return json.loads(UPLOADS_FILE.read_text("utf-8")).get(cache_key)
+        except (OSError, ValueError):
+            return None
+
+
+def remember_upload(cache_key, new_id):
+    with UPLOADS_LOCK:
+        try:
+            done = json.loads(UPLOADS_FILE.read_text("utf-8"))
+        except (OSError, ValueError):
+            done = {}
+        done[cache_key] = new_id
+        UPLOADS_FILE.write_text(json.dumps(done, indent=1), "utf-8")
+
+
+def upload_animation_file(data, user_id, name=""):
+    """Lädt eine KeyframeSequence, die das Plugin als .rbxm schickt, als eigene Animation hoch.
+    Gleiche Datei wird nur einmal hochgeladen. Gibt die neue ID."""
+    if not data.startswith(b"<roblox"):
+        raise ValueError("Keine Roblox-Datei angekommen.")
+    cache_key = f"{user_id}:sha1:{hashlib.sha1(data).hexdigest()}"
+    new_id = known_upload(cache_key)
+    if not new_id:
+        new_id = create_asset("Animation", safe_name(name) or "Animation", data, "animation.rbxm", "model/x-rbxm", user_id)
+        remember_upload(cache_key, new_id)
+    return new_id
+
+
+def upload_animation(asset_id, user_id, place=None, name=""):
+    """Lädt eine fremde Animation herunter und als eigene Animation neu hoch. Gibt die neue ID."""
+    cache_key = f"{user_id}:{asset_id}"
+    if known_upload(cache_key):
+        return known_upload(cache_key)
+    data, err = fetch(asset_id, load_cookie(), place)
+    if err:
+        raise RuntimeError(err)
+    ext = guess_ext(data)
+    if ext not in ("rbxm", "rbxmx"):
+        raise RuntimeError(f"Keine Animation ({ext})")
+    title = safe_name(name) or safe_name(asset_info(asset_id)[0]) or "Animation"
+    new_id = create_asset("Animation", title, data, f"animation.{ext}", "model/x-rbxm", user_id)
+    remember_upload(cache_key, new_id)
+    return new_id
 
 
 def upload_asset(asset_id, user_id, place=None):
     """Lädt ein fremdes Bild, eine Animation, einen Sound oder ein Mesh herunter und unter dem eigenen
     Account neu hoch (Open Cloud, apikey.txt). Gibt die neue ID zurück, die in den Eigenschaften funktioniert."""
-    key = API_KEY_FILE.read_text("utf-8").strip() if API_KEY_FILE.is_file() else ""
-    if not key:
-        raise RuntimeError("apikey.txt fehlt. Siehe README: Hochladen einrichten")
     data, err = fetch(asset_id, load_cookie(), place)
     if err:
         raise RuntimeError(err)
@@ -149,12 +204,11 @@ def upload_asset(asset_id, user_id, place=None):
         raise RuntimeError(f"Dieser Typ geht nicht hoch ({ext})")
     asset_type, ctype = UPLOAD_TYPES[ext]
     name = safe_name(asset_info(asset_id)[0]) or asset_type
-    new_id = create_asset(key, asset_type, name, data, ext, ctype, user_id)
+    new_id = create_asset(asset_type, name, data, f"asset.{ext}", ctype, user_id)
     return new_id if asset_type != "Decal" else image_id(new_id)
 
 
 def image_id(decal_id):
-    """Open Cloud gibt bei Bildern die Decal-ID. Texturen brauchen die Bild-ID darin; die steht im Decal-Asset selbst."""
     # Open Cloud gibt die Decal-ID. Texturen brauchen die Bild-ID darin; die steht im Decal-Asset selbst.
     for _ in range(5):
         decal, err = fetch(decal_id, load_cookie())
@@ -227,6 +281,17 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.error(502, str(e))
             self.send(200, json.dumps({"id": new_id}).encode())
+        elif url.path == "/api/plugin-upload-anim":
+            # Plugin: Animation unter eigenem Account neu hochladen. name = Name des Animation-Objekts.
+            ids = extract_ids(q.get("q", [""])[0], bare=True)
+            user = q.get("user", [""])[0]
+            if not ids or not user.isdigit():
+                return self.error(400, "ID oder User fehlt.")
+            try:
+                new_id = upload_animation(ids[0], user, parse_place(q.get("place", [""])[0]), q.get("name", [""])[0])
+            except Exception as e:
+                return self.error(502, str(e))
+            self.send(200, json.dumps({"id": new_id}).encode())
         elif url.path == "/api/plugin":
             # Für die Vorschau im Studio-Plugin: liefert Bytes plus Name und Typ, speichert nichts.
             ids = extract_ids(q.get("q", [""])[0], bare=True)
@@ -249,12 +314,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         url = urllib.parse.urlparse(self.path)
-        if url.path not in ("/api/bulk", "/api/plugin-bulk", "/api/plugin-save", "/api/plugin-store"):
+        if url.path not in ("/api/bulk", "/api/plugin-bulk", "/api/plugin-save", "/api/plugin-store", "/api/plugin-upload-anim-file"):
             return self.error(404, "Nicht gefunden")
         if self.foreign(url.path):
             return
         place = parse_place(urllib.parse.parse_qs(url.query).get("place", [""])[0])
         text = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8", "ignore")
+        if url.path == "/api/plugin-upload-anim-file":
+            # Plugin schickt eine KeyframeSequence als .rbxm (hex), die als eigene Animation hochgeladen wird.
+            qs = urllib.parse.parse_qs(url.query)
+            user = qs.get("user", [""])[0]
+            if not user.isdigit():
+                return self.error(400, "User fehlt.")
+            try:
+                new_id = upload_animation_file(bytes.fromhex(text.strip()), user, qs.get("name", [""])[0])
+            except ValueError as e:
+                return self.error(400, str(e) if "Roblox" in str(e) else "Datei kaputt angekommen.")
+            except Exception as e:
+                return self.error(502, str(e))
+            return self.send(200, json.dumps({"id": new_id}).encode())
         if url.path == "/api/plugin-store":
             # Plugin schickt eine ganze VFX/Ordner-Auswahl als .rbxm (hex, weil Luau-Strings sonst nicht binär-sicher ankommen).
             folder = urllib.parse.parse_qs(url.query).get("folder", [""])[0]
@@ -264,7 +342,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(400, "Datei kaputt angekommen.")
             file = safe_name(urllib.parse.parse_qs(url.query).get("file", [""])[0])
             path = safe_dir(folder) / (file or f"{safe_name(folder) or 'auswahl'}.rbxm")
-            path.write_bytes(data)
+            # Große Dateien kommen in Stücken: das erste überschreibt, die weiteren (append=1) hängen an.
+            with open(path, "ab" if urllib.parse.parse_qs(url.query).get("append") else "wb") as f:
+                f.write(data)
             return self.send(200, json.dumps({"path": str(path)}).encode())
         ids = extract_ids(text, bare=True)
         if ids and url.path == "/api/plugin-bulk":
