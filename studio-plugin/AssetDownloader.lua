@@ -19,18 +19,19 @@ local SERVER = "http://127.0.0.1:8765"
 -- Webseiten können diesen Header nicht mitschicken, so nimmt der Server nur Anfragen vom Plugin an.
 local PLUGIN_HEADERS = { ["X-Asset-Downloader"] = "plugin" }
 
--- Farben wie iOS im Dunkelmodus: schwarzer Grund, gestufte Grautöne, genau ein Akzent.
+-- Farben wie das Stealmaxxing-Logo: schwarzer Grund, dunkle Flächen mit einem Hauch Rot, genau ein roter Akzent.
 local BG = Color3.fromRGB(0, 0, 0)
-local CARD = Color3.fromRGB(28, 28, 30) -- #1C1C1E
-local FIELD = Color3.fromRGB(44, 44, 46) -- #2C2C2E, Felder und Listenzeilen in Karten
-local LINE = Color3.fromRGB(56, 56, 58) -- #38383A, Trennlinien
+local CARD = Color3.fromRGB(26, 20, 21) -- #1A1415
+local FIELD = Color3.fromRGB(43, 32, 34) -- #2B2022, Felder und Listenzeilen in Karten
+local LINE = Color3.fromRGB(64, 40, 43) -- #40282B, Trennlinien
 local TEXT = Color3.fromRGB(255, 255, 255)
-local MUTED = Color3.fromRGB(152, 152, 159) -- #98989F, 6,3:1 auf CARD
-local ACCENT = Color3.fromRGB(10, 132, 255) -- #0A84FF, nur Hauptaktion und Auswahl
-local GREY = Color3.fromRGB(58, 58, 60) -- #3A3A3C, Nebenaktionen
--- Früher eigene Farben je Knopf. Jetzt sind alle Nebenaktionen grau, damit Blau eine Bedeutung behält.
+local MUTED = Color3.fromRGB(176, 158, 160) -- #B09EA0, gut lesbar auf CARD
+local ACCENT = Color3.fromRGB(226, 27, 38) -- #E21B26, Rot aus dem Logo, nur Hauptaktion und Auswahl
+local GREY = Color3.fromRGB(62, 46, 48) -- #3E2E30, Nebenaktionen
+-- Früher eigene Farben je Knopf. Jetzt sind alle Nebenaktionen gleich, damit Rot eine Bedeutung behält.
 local BLUE, GREEN, PURPLE = GREY, GREY, GREY
-local BAD = Color3.fromRGB(255, 69, 58) -- #FF453A
+-- Fehler in Orange: Rot ist schon der Akzent, sonst sähe jede Hauptaktion wie ein Fehler aus.
+local BAD = Color3.fromRGB(255, 159, 10) -- #FF9F0A
 local OK = Color3.fromRGB(48, 209, 88) -- #30D158
 local FONT = {
 	regular = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Regular),
@@ -245,34 +246,34 @@ end
 -- Kopf -------------------------------------------------------------------------------------
 
 do
-	local head = add(Instance.new("Frame"))
-	head.Size, head.BackgroundTransparency = UDim2.new(1, 0, 0, 44), 1
-	-- Logo: App-Icon mit drei steigenden Balken, der höchste in Akzentblau. Steht für "maxxing".
-	local icon = Instance.new("Frame")
-	icon.Size, icon.BackgroundColor3 = UDim2.fromOffset(42, 42), Color3.new(1, 1, 1)
-	corner(icon, 10)
-	local sheen = Instance.new("UIGradient", icon) -- dezentes Material wie bei iOS-Icons, oben etwas heller
-	sheen.Rotation, sheen.Color = 90, ColorSequence.new(Color3.fromRGB(64, 64, 68), Color3.fromRGB(30, 30, 32))
-	icon.Parent = head
-	for i, h in { 10, 17, 24 } do
-		local bar = Instance.new("Frame")
-		bar.AnchorPoint = Vector2.new(0, 1)
-		bar.Size, bar.Position = UDim2.fromOffset(6, h), UDim2.fromOffset(8 + (i - 1) * 10, 33)
-		bar.BackgroundColor3 = i == 3 and ACCENT or Color3.fromRGB(235, 235, 245)
-		bar.BorderSizePixel = 0
-		corner(bar, 3)
-		bar.Parent = icon
-	end
-	local title = Instance.new("TextLabel")
-	title.Size, title.Position, title.BackgroundTransparency = UDim2.new(1, -54, 0, 24), UDim2.fromOffset(54, 1), 1
-	title.FontFace, title.TextSize, title.TextColor3 = FONT.heavy, 22, TEXT
-	title.TextXAlignment, title.Text = Enum.TextXAlignment.Left, "Stealmaxxing"
-	title.Parent = head
-	local sub = Instance.new("TextLabel")
-	sub.Size, sub.Position, sub.BackgroundTransparency = UDim2.new(1, -54, 0, 16), UDim2.fromOffset(54, 25), 1
-	sub.FontFace, sub.TextSize, sub.TextColor3 = FONT.regular, 13, MUTED
-	sub.TextXAlignment, sub.Text = Enum.TextXAlignment.Left, "Asset-Toolkit für Roblox Studio"
-	sub.Parent = head
+	-- Logo über die ganze Breite. Die Pixel kommen vom lokalen Server (studio-plugin/logo.png) und werden in ein
+	-- EditableImage gezeichnet: So muss das Bild nicht zu Roblox hochgeladen und moderiert werden.
+	local head = add(Instance.new("ImageLabel"))
+	head.Name, head.BackgroundTransparency = "Logo", 1
+	head.Size, head.ScaleType = UDim2.new(1, 0, 0, 150), Enum.ScaleType.Fit
+	local ratio = Instance.new("UIAspectRatioConstraint", head)
+	ratio.AspectRatio, ratio.DominantAxis = 760 / 348, Enum.DominantAxis.Width
+	-- Solange das Logo lädt oder der Server nicht läuft: Name in Rot.
+	local fallback = Instance.new("TextLabel")
+	fallback.Size, fallback.BackgroundTransparency = UDim2.fromScale(1, 1), 1
+	fallback.FontFace, fallback.TextSize, fallback.TextColor3 = FONT.heavy, 30, ACCENT
+	fallback.Text = "STEALMAXXING"
+	fallback.Parent = head
+	task.spawn(function()
+		local ok, res = pcall(HttpService.RequestAsync, HttpService,
+			{ Url = SERVER .. "/api/plugin-logo", Headers = PLUGIN_HEADERS, Method = "GET" })
+		if not (ok and res.Success) then return end
+		local size = {}
+		for k, v in res.Headers do size[k:lower()] = tonumber(v) end
+		local w, h = size["x-width"], size["x-height"]
+		if not (w and h and #res.Body == w * h * 4) then return end
+		local okImg, img = pcall(AssetService.CreateEditableImage, AssetService, { Size = Vector2.new(w, h) })
+		if not (okImg and img) then return end
+		img:WritePixelsBuffer(Vector2.zero, Vector2.new(w, h), buffer.fromstring(res.Body))
+		ratio.AspectRatio = w / h
+		head.ImageContent = Content.fromObject(img)
+		fallback.Visible = false
+	end)
 end
 
 -- Tabs als Segmented Control wie bei iOS: ein Daumen gleitet unter den gewählten Namen.
@@ -281,7 +282,7 @@ tabBar.Size, tabBar.BackgroundColor3 = UDim2.new(1, 0, 0, 34), CARD
 corner(tabBar, 9)
 do
 	local thumb = Instance.new("Frame")
-	thumb.Name, thumb.BackgroundColor3, thumb.BorderSizePixel = "Thumb", Color3.fromRGB(99, 99, 102), 0
+	thumb.Name, thumb.BackgroundColor3, thumb.BorderSizePixel = "Thumb", Color3.fromRGB(122, 22, 30), 0 -- dunkles Logo-Rot
 	corner(thumb, 7)
 	thumb.Parent = tabBar
 	local track = Instance.new("Frame")

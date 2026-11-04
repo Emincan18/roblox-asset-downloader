@@ -21,6 +21,7 @@ import urllib.request
 import uuid
 import webbrowser
 import zipfile
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -222,6 +223,54 @@ def image_id(decal_id):
     return decal_id
 
 
+LOGO_FILE = Path(__file__).with_name("studio-plugin") / "logo.png"
+_logo_cache = None
+
+
+def png_rgba(data):
+    """Liest ein 8-Bit-RGBA-PNG ohne Zusatzpakete. Gibt (Breite, Höhe, rohe RGBA-Bytes)."""
+    pos, idat, width, height = 8, b"", 0, 0
+    while pos < len(data):
+        length = int.from_bytes(data[pos:pos + 4], "big")
+        kind, chunk = data[pos + 4:pos + 8], data[pos + 8:pos + 8 + length]
+        if kind == b"IHDR":
+            width, height = int.from_bytes(chunk[0:4], "big"), int.from_bytes(chunk[4:8], "big")
+            if chunk[8] != 8 or chunk[9] != 6 or chunk[12] != 0:
+                raise ValueError("Logo muss ein 8-Bit-RGBA-PNG ohne Interlacing sein")
+        elif kind == b"IDAT":
+            idat += chunk
+        pos += 12 + length
+    raw, stride = zlib.decompress(idat), width * 4
+    out, prev = bytearray(), bytearray(stride)
+    for y in range(height):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - 4] if i >= 4 else 0
+            b = prev[i]
+            c = prev[i - 4] if i >= 4 else 0
+            if f == 1:
+                line[i] = (line[i] + a) & 255
+            elif f == 2:
+                line[i] = (line[i] + b) & 255
+            elif f == 3:
+                line[i] = (line[i] + (a + b) // 2) & 255
+            elif f == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        out += line
+        prev = line
+    return width, height, bytes(out)
+
+
+def plugin_logo():
+    """Logo für den Kopf des Plugins als rohe Pixel (das Plugin zeichnet sie in ein EditableImage).
+    So muss das Bild nicht zu Roblox hochgeladen werden. Einmal gelesen, dann aus dem Speicher."""
+    global _logo_cache
+    if _logo_cache is None:
+        _logo_cache = png_rgba(LOGO_FILE.read_bytes())
+    return _logo_cache
+
+
 def file_name(asset_id, data, name=None):
     if name is None:
         name, _ = asset_info(asset_id)
@@ -303,6 +352,12 @@ class Handler(BaseHTTPRequestHandler):
             name, kind = asset_info(ids[0])
             self.send(200, data, "application/octet-stream", file_name(ids[0], data, name),
                       {"X-Id": ids[0], "X-Name": urllib.parse.quote(name), "X-Type": kind, "X-Ext": guess_ext(data)})
+        elif url.path == "/api/plugin-logo":
+            try:
+                width, height, pixels = plugin_logo()
+            except (OSError, ValueError) as e:
+                return self.error(404, str(e))
+            self.send(200, pixels, "application/octet-stream", extra={"X-Width": str(width), "X-Height": str(height)})
         elif url.path == "/api/plugin-file":
             # Gegenstück zu plugin-store: Plugin holt eine gespeicherte Datei zurück (Senden an andere Place).
             path = safe_dir(q.get("folder", [""])[0]) / safe_name(q.get("file", [""])[0])
