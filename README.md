@@ -30,7 +30,7 @@ Roblox gibt neue Assets nur an eingeloggte Accounts heraus. Das Tool nutzt dafü
 
 ### Webseite
 
-`start.bat` doppelklicken. Der Browser öffnet `http://127.0.0.1:8765`.
+`start.bat` doppelklicken. Der Browser öffnet `http://127.0.0.1:47651`.
 
 - **Einzeln:** ID oder Link eingeben, auf **Download** klicken.
 - **Bulk:** Viele IDs oder Links untereinander einfügen und auf **Alle als ZIP laden** klicken. Die ZIP enthält eine `report.csv`, die zeigt, was geklappt hat.

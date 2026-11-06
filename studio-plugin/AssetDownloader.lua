@@ -15,7 +15,7 @@ local AssetService = game:GetService("AssetService")
 local SoundService = game:GetService("SoundService")
 local Players = game:GetService("Players")
 
-local SERVER = "http://127.0.0.1:8765"
+local SERVER = "http://127.0.0.1:47651"
 -- Webseiten können diesen Header nicht mitschicken, so nimmt der Server nur Anfragen vom Plugin an.
 local PLUGIN_HEADERS = { ["X-Asset-Downloader"] = "plugin" }
 
