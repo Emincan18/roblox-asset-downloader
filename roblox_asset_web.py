@@ -1,7 +1,7 @@
 """Roblox Asset Downloader als lokale Webseite.
 
 Start:  python roblox_asset_web.py   (oder start.bat doppelklicken)
-Öffnet http://127.0.0.1:8765 im Browser. ID oder Link eingeben, Download klicken.
+Öffnet http://127.0.0.1:47651 im Browser. ID oder Link eingeben, Download klicken.
 
 Neue und private Assets brauchen den eigenen .ROBLOSECURITY-Cookie in cookie.txt
 neben diesem Script (siehe roblox_asset_downloader.py).
@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from roblox_asset_downloader import extract_ids, fetch, fetch_many, guess_ext, load_cookie, parse_place
 
-PORT = 8765
+PORT = 47651  # 8765 benutzt das Blender-MCP-Addon, dann landeten Browser und Plugin bei Blender.
 DOWNLOADS = Path(__file__).with_name("downloads")
 ASSET_TYPES = {1: "Image", 2: "T-Shirt", 3: "Audio", 4: "Mesh", 8: "Hat", 10: "Model", 11: "Shirt", 12: "Pants",
                13: "Decal", 24: "Animation", 38: "Plugin", 40: "MeshPart", 41: "Hair", 42: "Face", 43: "Neck",
@@ -591,6 +591,12 @@ if __name__ == "__main__":
     try:
         server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     except OSError:
+        try:  # Läuft dort wirklich dieser Server oder ein fremdes Programm?
+            ours = b"Roblox Asset Downloader" in urllib.request.urlopen(f"http://127.0.0.1:{PORT}", timeout=3).read()
+        except Exception:
+            ours = False
+        if not ours:
+            raise SystemExit(f"Port {PORT} ist von einem anderen Programm belegt. Das Programm schließen und start.bat neu öffnen.")
         webbrowser.open(f"http://127.0.0.1:{PORT}")
         raise SystemExit("Läuft schon in einem anderen Fenster. Browser wurde geöffnet.\n"
                          "Nach einem Update das alte Fenster schließen und start.bat neu öffnen, sonst läuft die alte Version.")
