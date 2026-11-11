@@ -259,20 +259,37 @@ do
 	fallback.FontFace, fallback.TextSize, fallback.TextColor3 = FONT.heavy, 30, ACCENT
 	fallback.Text = "STEALMAXXING"
 	fallback.Parent = head
+	-- Wächter statt einmaligem Laden: Läuft der Server beim Studio-Start noch nicht, wird es weiter versucht.
+	-- Verschwindet das Bild (EditableImage freigegeben), wird es aus den gemerkten Pixeln neu gezeichnet.
 	task.spawn(function()
-		local ok, res = pcall(HttpService.RequestAsync, HttpService,
-			{ Url = SERVER .. "/api/plugin-logo", Headers = PLUGIN_HEADERS, Method = "GET" })
-		if not (ok and res.Success) then return end
-		local size = {}
-		for k, v in res.Headers do size[k:lower()] = tonumber(v) end
-		local w, h = size["x-width"], size["x-height"]
-		if not (w and h and #res.Body == w * h * 4) then return end
-		local okImg, img = pcall(AssetService.CreateEditableImage, AssetService, { Size = Vector2.new(w, h) })
-		if not (okImg and img) then return end
-		img:WritePixelsBuffer(Vector2.zero, Vector2.new(w, h), buffer.fromstring(res.Body))
-		ratio.AspectRatio = w / h
-		head.ImageContent = Content.fromObject(img)
-		fallback.Visible = false
+		local img, pixels, w, h -- img bleibt hier stark referenziert, sonst kann Luau es wegräumen
+		while true do
+			local content = head.ImageContent
+			if not (img and content.SourceType == Enum.ContentSourceType.Object and content.Object == img) then
+				if not pixels then
+					local ok, res = pcall(HttpService.RequestAsync, HttpService,
+						{ Url = SERVER .. "/api/plugin-logo", Headers = PLUGIN_HEADERS, Method = "GET" })
+					if ok and res.Success then
+						local size = {}
+						for k, v in res.Headers do size[k:lower()] = tonumber(v) end
+						if size["x-width"] and size["x-height"] and #res.Body == size["x-width"] * size["x-height"] * 4 then
+							w, h, pixels = size["x-width"], size["x-height"], buffer.fromstring(res.Body)
+						end
+					end
+				end
+				if pixels then
+					local okImg, newImg = pcall(AssetService.CreateEditableImage, AssetService, { Size = Vector2.new(w, h) })
+					if okImg and newImg then
+						newImg:WritePixelsBuffer(Vector2.zero, Vector2.new(w, h), pixels)
+						img = newImg
+						ratio.AspectRatio = w / h
+						head.ImageContent = Content.fromObject(img)
+					end
+				end
+			end
+			fallback.Visible = not (img and head.ImageContent.Object == img)
+			task.wait(img and 5 or 3)
+		end
 	end)
 end
 
@@ -903,6 +920,7 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			{ "character", { "Humanoid", "HumanoidRootPart" } },
 			{ "humanoid", { "Health", "MaxHealth", "TakeDamage", "WalkSpeed", "JumpPower", "Died", "RootPart" } },
 			{ "track", { "TimePosition", "AdjustSpeed", "IsPlaying", "GetMarkerReachedSignal" } },
+			{ "animator", { "LoadAnimation", "GetPlayingAnimationTracks" } },
 			{ "connection", { "Disconnect" } },
 			{ "remote", { "FireServer", "FireClient", "FireAllClients", "InvokeServer", "OnClientEvent", "OnServerEvent" } },
 			{ "input", { "UserInputType", "KeyCode", "UserInputState" } },
@@ -936,7 +954,8 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 		end
 
 		-- Name aus der rechten Seite von local x = <rhs>. nil, wenn nichts Sinnvolles folgt.
-		local function nameFromRhs(rhs)
+		local nameFromRhs
+		function nameFromRhs(rhs)
 			rhs = rhs:gsub(";%s*$", ""):gsub("%s+$", ""):gsub("%s+or%s+nil$", "")
 			if rhs == "nil" or isDecompName(rhs) then return nil end
 			if rhs == "..." then return "args" end
@@ -959,8 +978,9 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			if rhs:match('^"') or rhs:match("^'") then return "text" end
 			if rhs:match("^{") then return "list" end
 			local child = rhs:match(':WaitForChild%("([^"]+)"[^)]*%)$') or rhs:match(':FindFirstChild%("([^"]+)"[^)]*%)$')
+				or rhs:match(':GetAttribute%("([^"]+)"%)$')
 			if child then return ident(lowerFirst(child)) end
-			local ctor = rhs:match("^([%u][%w]*)%.new%(")
+			local ctor = rhs:match("^([%u][%w]*)%.new%(") or rhs:match("^[%w_%.]*%.([%u][%w]*)%.new%(") -- Parent.Gradient.new(…)
 			if ctor then
 				-- Vector2 -> vector, CFrame -> cframe, UDim2 -> udim (Ziffern stören, wenn ein Zähler drankommt)
 				ctor = ctor:gsub("%d+$", "")
@@ -970,12 +990,14 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			if chain then return lowerFirst(chain) end
 			if rhs:match("^[%a_][%w_]+$") and not KEYWORDS[rhs] then return lowerFirst(rhs) end -- local v5 = LocalPlayer (nicht aus "v")
 			local call = rhs:match("^([%a_][%w_]*)%(")
-			if call and not ({ tostring = 1, tonumber = 1, pcall = 1, unpack = 1, select = 1, type = 1, typeof = 1 })[call] then
+			if call and not ({ tostring = 1, tonumber = 1, pcall = 1, unpack = 1, select = 1, type = 1, typeof = 1, ["function"] = 1 })[call] then
 				call = call:gsub("^[Gg]et", ""):gsub("^[Cc]reate", ""):gsub("^[Mm]ake", ""):gsub("^[Bb]uild", "")
 				if call ~= "" then return ident(lowerFirst(call)) end
 			end
-			if call == "tostring" then return "text" end
-			if call == "tonumber" then return "number" end
+			if call == "tostring" or call == "tonumber" then
+				-- tonumber(x:GetAttribute("Volume")) heißt wie das Innere
+				return nameFromRhs(rhs:match("^%a+%((.*)%)$") or "") or (call == "tostring" and "text" or "number")
+			end
 			local method = rhs:match(":([%a_][%w_]*)%([^()]*%)$")
 			if method then
 				method = method:gsub("^GetPlayerFrom", ""):gsub("^FindFirst", ""):gsub("^Get", ""):gsub("^Find", "")
@@ -1070,19 +1092,40 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 		-- Gibt neuen Code und Zahl der umbenannten Variablen. scriptName: Name für die Klassen-Tabelle des Moduls.
 		local function renameSource(src, scriptName)
 			local toks = lex(src)
-			local used, targets, order = {}, {}, {}
+			local targets, order = {}, {}
 			local function prevSignificant(k)
 				k -= 1
 				while k > 0 and toks[k][1] == "o" and toks[k][2]:match("^%s+$") do k -= 1 end
 				return k
 			end
+			local ctx = {} -- "{" Tabelle, "(" Klammer, "b" Block: Schlüssel { Name = … } nur direkt in einer Tabelle
 			for k, t in toks do
-				if t[1] == "n" then
-					used[t[2]] = true
+				local w = t[2]
+				if t[1] == "o" then
+					if w == "{" or w == "(" then
+						table.insert(ctx, w)
+					elseif w == "}" or w == ")" then
+						table.remove(ctx)
+					end
+				elseif t[1] == "n" then
 					-- Feld (obj.v1, obj:v1) ist kein Variablenname; ".." (Verkettung) schon.
 					local p = prevSignificant(k)
 					local isField = p > 0 and (toks[p][2] == ":" or (toks[p][2] == "." and not (p > 1 and toks[p - 1][2] == ".")))
+					local prevP = p > 0 and not isField and toks[p][2]
+					if not isDecompName(w) and ctx[#ctx] == "{" and (prevP == "{" or prevP == "," or prevP == ";") then
+						-- Schlüssel im Tabellen-Konstruktor { Speed = … } ist auch kein Variablenname.
+						local n1 = k + 1
+						while n1 <= #toks and toks[n1][1] == "o" and toks[n1][2]:match("^%s+$") do n1 += 1 end
+						isField = toks[n1] ~= nil and toks[n1][2] == "=" and not (toks[n1 + 1] and toks[n1 + 1][2] == "=")
+					end
 					t.field = isField
+					if not isField then
+						if w == "function" or w == "if" or w == "do" or w == "repeat" then
+							table.insert(ctx, "b")
+						elseif w == "end" or w == "until" then
+							table.remove(ctx)
+						end
+					end
 					if not isField and isDecompName(t[2]) and not targets[t[2]] then
 						targets[t[2]] = true
 						table.insert(order, t[2]) -- Reihenfolge im Code, damit Zähler (vector, vector2 …) von oben nach unten laufen
@@ -1098,6 +1141,10 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					wanted[name] = ident(scriptName) -- local u2 = {}; u2.__index = u2 ist die Klasse des Moduls
 				else
 					wanted[name] = rhs and nameFromRhs(rhs)
+					-- Der Decompiler schreibt den echten Funktionsnamen in den Kommentar: function(…) -- Line: 1, Name: SpringStep
+					local real = rhs and rhs:match("^function%(.-%-%-.-Name:%s*([%a_][%w_]*)")
+						or src:match("local%s+function%s+" .. name .. "%([^\n]-%-%-[^\n]-Name:%s*([%a_][%w_]*)")
+					if real and real ~= "anonymous" and not isDecompName(real) then wanted[name] = lowerFirst(real) end
 				end
 				if not wanted[name] then
 					local later = src:match("\n[ \t]*" .. name .. "[ \t]*=[ \t]*([^=\n][^\n]*)")
@@ -1146,8 +1193,142 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					end
 				end
 			end
-			-- Alles ohne Namen bekommt einen aus Schleife, Verwendung oder Rolle, damit keine Nummer-Namen übrig bleiben.
-			local roles, best = {}, {}
+			-- Gültigkeitsbereich jeder Variable als Token-Spanne: vom ersten Auftreten bis zum Ende des Blocks, in dem sie lebt.
+			-- Variablen, deren Spannen sich nicht überschneiden (z. B. in verschiedenen Funktionen), dürfen denselben Namen
+			-- tragen. Deshalb heißen sie überall "player" statt player, player2, player3 …
+			-- Echte Namen: Deklarationen bekommen ebenfalls Spannen; ein Name, der irgendwo global benutzt wird, ist ganz gesperrt.
+			local spans, origDecl, globalNames, ctxFunc = {}, {}, {}, {}
+			do
+				local blockEnd, stack, nextId = { [0] = #toks }, { 0 }, 0
+				local header, inParams, localList, forVars, forCollect = false, false, false, nil, false
+				local funcName, headerName = {}, nil -- Block-ID einer Funktion -> ihr Name (für Namen wie switchToAnimValue)
+				local origOcc = {}
+				local function note(name, k, block, decl)
+					local list = origOcc[name]
+					if not list then
+						list = {}
+						origOcc[name] = list
+					end
+					table.insert(list, { k, block, decl })
+				end
+				local function mark(name, k, block)
+					local s = spans[name]
+					if not s then
+						s = { first = k, blocks = {} }
+						spans[name] = s
+						for i = #stack, 1, -1 do -- innerste Funktion mit Namen
+							if funcName[stack[i]] then
+								ctxFunc[name] = funcName[stack[i]]
+								break
+							end
+						end
+					end
+					if k < s.first then s.first = k end
+					s.blocks[block] = true
+				end
+				for k, t in toks do
+					local w = t[2]
+					if header and t[1] == "n" and w ~= "function" then headerName = w end
+					if t[1] == "n" and not t.field then
+						if w == "function" or w == "if" or w == "repeat" or w == "do" then
+							nextId += 1
+							table.insert(stack, nextId)
+							if w == "function" then
+								header, localList, headerName = true, false, nil
+								local p = prevSignificant(k) -- M.Foo = function(…) / local v5 = function(…)
+								local b = p > 0 and toks[prevSignificant(p)]
+								if toks[p] and toks[p][2] == "=" and b and b[1] == "n" then headerName = b[2] end
+							end
+							if w == "do" and forVars then -- Schleifenvariablen leben im Rumpf der Schleife
+								for _, entry in forVars do
+									if targets[entry[1]] then mark(entry[1], entry[2], nextId) else note(entry[1], entry[2], nextId, true) end
+								end
+								forVars = nil
+							end
+						elseif w == "end" or w == "until" then
+							if #stack > 1 then blockEnd[table.remove(stack)] = k end
+						elseif (w == "else" or w == "elseif") and #stack > 1 then
+							-- Jeder Zweig eines if ist ein eigener Block: Variablen aus then und else dürfen gleich heißen.
+							blockEnd[table.remove(stack)] = k
+							nextId += 1
+							table.insert(stack, nextId)
+						elseif w == "for" then
+							forVars, forCollect = {}, true
+						elseif w == "in" then
+							forCollect = false
+						elseif w == "local" then
+							localList = true
+						elseif KEYWORDS[w] then
+							-- andere Schlüsselwörter sind keine Namen
+						elseif header then -- local function vN(…): der Name gehört zum äußeren Block
+							if targets[w] then
+								mark(w, k, stack[#stack - 1] or 0)
+							else
+								local p = prevSignificant(k)
+								local pp = p > 0 and prevSignificant(p) or 0
+								note(w, k, stack[#stack - 1] or 0, toks[p][2] == "function" and pp > 0 and toks[pp][2] == "local")
+							end
+						elseif forVars and forCollect then
+							table.insert(forVars, { w, k })
+						elseif targets[w] then
+							mark(w, k, stack[#stack])
+						else
+							local prev = toks[prevSignificant(k)]
+							note(w, k, stack[#stack], inParams or (localList and prev ~= nil and (prev[2] == "local" or prev[2] == ",")))
+						end
+					elseif w == "(" and header then
+						header, inParams = false, true
+						funcName[stack[#stack]] = headerName
+					elseif w == ")" and inParams then
+						inParams = false
+					elseif w == "=" or w == ";" or w == "\n" then
+						localList = false
+						if w == "=" then forCollect = false end
+					end
+				end
+				for _, s in spans do
+					local last = s.first
+					for block in s.blocks do last = math.max(last, blockEnd[block] or #toks) end
+					s.last = last
+				end
+				for name, list in origOcc do
+					local decls = {}
+					for _, o in list do
+						if o[3] then table.insert(decls, { first = o[1], last = blockEnd[o[2]] or #toks }) end
+					end
+					origDecl[name] = decls
+					for _, o in list do
+						local covered = o[3]
+						for _, d in decls do
+							if covered then break end
+							covered = o[1] >= d.first and o[1] <= d.last
+						end
+						if not covered then
+							globalNames[name] = true
+							break
+						end
+					end
+				end
+			end
+
+			-- Hinweise aus der Verwendung sammeln.
+			local CALL_ARG = { FindFirstChild = "childName", WaitForChild = "childName", FindFirstChildOfClass = "className",
+				FindFirstChildWhichIsA = "className", IsA = "className", GetService = "serviceName", LoadAnimation = "animation",
+				wait = "duration", delay = "delay", GetAttribute = "attributeName", SetAttribute = "attributeName",
+				GetPlayerFromCharacter = "character", FireClient = "player", InvokeClient = "player", TakeDamage = "damage",
+				GetMarkerReachedSignal = "markerName", AddItem = "object", spawn = "callback", defer = "callback",
+				require = "module", Kick = "reason", GetPropertyChangedSignal = "propertyName", Play = "fadeTime", Stop = "fadeTime",
+				AdjustSpeed = "speed", AdjustWeight = "weight" }
+			local GENERIC_WORDS = { value = true, list = true, text = true, flag = true, object = true, arg = true, amount = true,
+				callback = true, instance = true }
+			local SETTER = { Set = true, Add = true, Remove = true, Give = true, Take = true, Apply = true, Play = true,
+				Load = true, Spawn = true, Equip = true, Unequip = true, Update = true }
+			local roles, best, isParam, setter, usage, prop, callArg, counter = {}, {}, {}, {}, {}, {}, {}, {}
+			local funcParams, fromCall, headerParen, funcGuess = {}, {}, {}, {}
+			local PLUMBING = { Connect = true, Once = true, Wait = true, Disconnect = true, FindFirstChild = true, WaitForChild = true,
+				FindFirstChildOfClass = true, FindFirstChildWhichIsA = true, FindFirstAncestor = true, GetService = true, IsA = true,
+				GetChildren = true, GetDescendants = true, GetAttribute = true, GetPropertyChangedSignal = true, Clone = true,
+				IsDescendantOf = true, FindFirstAncestorOfClass = true, FindFirstAncestorWhichIsA = true }
 			local function nextSig(k)
 				k += 1
 				while k <= #toks and toks[k][1] == "o" and toks[k][2]:match("^%s+$") do k += 1 end
@@ -1157,12 +1338,52 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 				if t[1] == "n" and not t.field then
 					local w = t[2]
 					if w == "function" then
-						local m = k + 1
-						while m <= #toks and toks[m][2] ~= "(" do m += 1 end
+						local m, fname = k + 1, nil
+						while m <= #toks and toks[m][2] ~= "(" do
+							if toks[m][1] == "n" then fname = toks[m][2] end
+							m += 1
+						end
+						-- function M.SetSpeed(self, p2): der erste echte Parameter ist die "speed"
+						if not fname then -- local v9 = function(…)
+							local p = prevSignificant(k)
+							local b = p > 0 and toks[prevSignificant(p)]
+							if toks[p] and toks[p][2] == "=" and b and b[1] == "n" then fname = b[2] end
+						end
+						local verb, rest = (fname or ""):match("^(%u%l+)(%u[%w_]*)$")
+						local plist = {}
+						if fname then funcParams[fname] = plist end
+						headerParen[m] = true
+						-- Lokale Funktion heißt nach dem, was sie tut: erster :Methode(…)-Aufruf im Rumpf, z. B. takeDamage.
+						if fname and targets[fname] and not funcGuess[fname] then
+							local depth, e = 0, k
+							while e <= #toks do
+								local b = toks[e]
+								if b[1] == "n" and not b.field then
+									if b[2] == "function" or b[2] == "if" or b[2] == "do" or b[2] == "repeat" then
+										depth += 1
+									elseif b[2] == "end" or b[2] == "until" then
+										depth -= 1
+										if depth == 0 then break end
+									end
+								elseif b[1] == "n" and not PLUMBING[b[2]] and toks[prevSignificant(e)][2] == ":" then
+									funcGuess[fname] = ident(lowerFirst(b[2]))
+									break
+								end
+								e += 1
+							end
+						end
+						local hint = verb and SETTER[verb] and ident(lowerFirst(rest)) or nil
 						m += 1
 						while m <= #toks and toks[m][2] ~= ")" do
 							local v = toks[m]
-							if v[1] == "n" and targets[v[2]] and not roles[v[2]] then roles[v[2]] = "arg" end
+							if v[1] == "n" then table.insert(plist, v[2]) end
+							if v[1] == "n" and v[2] ~= "self" and not selfParams[v[2]] then
+								if targets[v[2]] then
+									isParam[v[2]] = true
+									if hint then setter[v[2]] = hint end
+								end
+								hint = nil
+							end
 							m += 1
 						end
 					elseif w == "for" then
@@ -1185,53 +1406,187 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 							end
 						end
 					elseif targets[w] then
-						-- Verwendung: name.Member / name:Member(
 						local n1 = nextSig(k)
 						local sep = toks[n1] and toks[n1][2]
-						if sep == "." or sep == ":" then
-							local n2 = nextSig(n1)
-							local role = toks[n2] and toks[n2][1] == "n" and MEMBER_TO_ROLE[toks[n2][2]]
+						local after = toks[nextSig(n1)]
+						if sep == "." and after and after[2] == "." then
+							usage[w] = usage[w] or "text" -- v .. "…"
+						elseif sep == "." or sep == ":" then
+							local role = after and after[1] == "n" and MEMBER_TO_ROLE[after[2]]
 							if role and (not best[w] or role[2] < best[w][2]) then best[w] = role end
 						elseif sep == "(" and not best[w] then
 							best[w] = { "callback", 99 }
+						elseif sep == "[" then
+							usage[w] = usage[w] or "list"
+						elseif sep == "+" and after and after[2] == "=" then
+							counter[w] = "count" -- v += 1
+						elseif sep and sep:match("^[%+%-%*/%%%^<>]$") then
+							usage[w] = usage[w] or "amount"
+						end
+						local p1 = prevSignificant(k)
+						local before = toks[p1] and toks[p1][2]
+						local b2 = toks[prevSignificant(p1)]
+						if before == "=" and b2 and b2[1] == "n" and b2.field then
+							prop[w] = prop[w] or ident(lowerFirst(b2[2])) -- x.Parent = v
+						elseif before == "(" and b2 and b2[1] == "n" then
+							local verb, rest = b2[2]:match("^(%u%l+)(%u[%w_]*)$")
+							if CALL_ARG[b2[2]] then
+								callArg[w] = callArg[w] or CALL_ARG[b2[2]]
+							elseif verb and SETTER[verb] then
+								callArg[w] = callArg[w] or ident(lowerFirst(rest)) -- :SetPrimaryPartCFrame(v) -> primaryPartCFrame
+							elseif b2[2] == "ipairs" or b2[2] == "pairs" then
+								usage[w] = usage[w] or "list"
+							end
+						elseif before == "#" or before == "in" then
+							usage[w] = usage[w] or "list"
+						elseif before and before:match("^[%+%-%*/%%%^<>]$") then
+							usage[w] = usage[w] or "amount"
 						end
 					end
 				end
 			end
 
+			-- Parameter heißen wie das, was an der Aufrufstelle übergeben wird: switchToAnim(animTable, …) -> animTable.
+			for k, t in toks do
+				local params = t[1] == "n" and funcParams[t[2]]
+				if params then
+					local n1 = nextSig(k)
+					if toks[n1] and toks[n1][2] == "(" and not headerParen[n1] then
+						local m, depth, index, argTok, argLen = n1 + 1, 0, 1, nil, 0
+						while m <= #toks do
+							local a = toks[m]
+							local w = a[2]
+							if a[1] == "o" and (w == "(" or w == "{" or w == "[") then
+								depth += 1
+							elseif a[1] == "o" and (w == ")" or w == "}" or w == "]") and depth > 0 then
+								depth -= 1
+							elseif depth == 0 and a[1] == "o" and (w == "," or w == ")") then
+								local param = params[index]
+								if argLen == 1 and argTok and argTok[1] == "n" and param and targets[param] and not fromCall[param] then
+									local given = argTok[2]
+									local idea
+									if targets[given] then idea = wanted[given] elseif not KEYWORDS[given] then idea = lowerFirst(given) end
+									if idea and not GENERIC_WORDS[idea] then fromCall[param] = idea end
+								end
+								if w == ")" then break end
+								index, argTok, argLen = index + 1, nil, 0
+								m += 1
+								continue
+							end
+							if not (a[1] == "o" and w:match("^%s+$")) and a[1] ~= "c" then
+								argTok, argLen = a, argLen + 1
+							end
+							m += 1
+						end
+					end
+				end
+			end
+
+			-- Gleicher Name nur, wenn sich die Gültigkeitsbereiche nicht überschneiden und kein Originalname im Skript so heißt.
+			local GENERIC = GENERIC_WORDS
+			local ORDINALS = { "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth" }
+			local SKIP_CONTEXT = { game = true, workspace = true, script = true, math = true, task = true, string = true, table = true,
+				Instance = true, Vector3 = true, Vector2 = true, CFrame = true, Color3 = true, UDim2 = true, UDim = true, Enum = true,
+				TweenInfo = true, new = true, tostring = true, tonumber = true, require = true, pcall = true, typeof = true, type = true,
+				ipairs = true, pairs = true, select = true, unpack = true, setmetatable = true, os = true, self = true }
+			local taken = {}
+			local function free(candidate, span)
+				if globalNames[candidate] or KEYWORDS[candidate] or isDecompName(candidate) or candidate:match("^[vup]%d*$") then
+					return false
+				end
+				for _, other in origDecl[candidate] or {} do
+					if span.first <= other.last and other.first <= span.last then return false end
+				end
+				for _, other in taken[candidate] or {} do
+					if span.first <= other.last and other.first <= span.last then return false end
+				end
+				return true
+			end
 			local map, count = {}, 0
 			for _, name in order do
-				if not wanted[name] and not selfParams[name] then
-					local role = roles[name]
-					if role == "arg" or not role then
-						role = best[name] and best[name][1] or role or "value"
-					end
-					wanted[name] = role
-				end
 				if selfParams[name] and not wanted[name] then
 					-- pN kommt nur in seiner eigenen Methode vor, und dort gibt es kein anderes self.
 					map[name] = "self"
 					count += 1
 					continue
 				end
-				local base = wanted[name]
-				if base and KEYWORDS[base] then base ..= "Value" end -- z. B. "type" aus einem Aufruf
-				if base and base:match("^[vup]%d*$") then base = "value" end -- sonst zählt der Zähler v2, v3 … endlos
-				if base then
-					local candidate, suffix = base, 1
-					while used[candidate] or KEYWORDS[candidate] or isDecompName(candidate) do -- "v" + 2 wäre wieder v2
-						suffix += 1
-						candidate = base .. suffix
+				local called = best[name] and best[name][1] == "callback"
+				local ideas = { wanted[name], roles[name], funcGuess[name], best[name] and best[name][1], setter[name], fromCall[name],
+					counter[name], prop[name], callArg[name], not called and usage[name] or nil,
+					not called and (isParam[name] and "arg" or "value") or nil }
+				local specific, generic = {}, {}
+				for i = 1, 11 do
+					local idea = ideas[i]
+					-- Ideen wie "v" oder "u" sind nie frei: v2, v3 … wären wieder Decompiler-Namen (Endlosschleife).
+					if idea and idea ~= "" and not idea:match("^[vup]%d*$") and not isDecompName(idea) then
+						idea = idea:gsub("(%a)%d+$", "%1") -- textColor3 -> textColor, sonst sieht es wie ein Zähler aus
+						if KEYWORDS[idea] then idea ..= "Value" end -- z. B. "type" aus einem Aufruf
+						table.insert(GENERIC[idea] and generic or specific, idea)
 					end
-					used[candidate] = true
-					map[name] = candidate
-					count += 1
 				end
+				table.move(generic, 1, #generic, #specific + 1, specific)
+				local span, chosen = spans[name] or { first = 0, last = math.huge }, nil
+				for _, idea in specific do
+					if free(idea, span) then
+						chosen = idea
+						break
+					end
+				end
+				if not chosen then
+					-- Alle Ideen belegt. Nie eine Zahl: otherPlayer, dann mit Kontext (switchToAnimArg, startTimeAmount),
+					-- dann Ordnungswörter (thirdValue …), zuletzt Buchstaben (valueA, valueB …).
+					local base = specific[1] or "value"
+					local Base = base:sub(1, 1):upper() .. base:sub(2)
+					local tries = { "other" .. Base }
+					local function compound(word)
+						if type(word) ~= "string" then return end
+						if targets[word] then word = map[word] end
+						if not word or word == base or KEYWORDS[word] or isDecompName(word) or #word > 24 then return end
+						word = lowerFirst(word):gsub("%d+$", "")
+						if word ~= "" and not word:match("^[vup]$") then table.insert(tries, word .. Base) end
+					end
+					compound(ctxFunc[name])
+					local rhs = src:match("local%s+" .. name .. "%s*=%s*([^\n]+)") or src:match("\n[ \t]*" .. name .. "[ \t]*=[ \t]*([^=\n][^\n]*)")
+					if rhs then
+						for word in rhs:gmatch("[%a_][%w_]*") do
+							if word ~= name and not KEYWORDS[word] and not SKIP_CONTEXT[word] then
+								compound(word)
+								break
+							end
+						end
+					end
+					for _, ordinal in ORDINALS do table.insert(tries, ordinal .. Base) end
+					for _, candidate in tries do
+						if free(candidate, span) then
+							chosen = candidate
+							break
+						end
+					end
+					local n = 0
+					while not chosen do
+						n += 1
+						if n > 100000 then error("Kein freier Name für " .. name) end -- Notbremse, Skript bleibt dann unverändert
+						local letters, x = "", n
+						repeat
+							letters = string.char(65 + (x - 1) % 26) .. letters
+							x = (x - 1) // 26
+						until x == 0
+						if free(base .. letters, span) then chosen = base .. letters end
+					end
+				end
+				taken[chosen] = taken[chosen] or {}
+				table.insert(taken[chosen], span)
+				map[name] = chosen
+				count += 1
 			end
 			if count == 0 then return src, 0 end
 			local out = table.create(#toks)
 			for k, t in toks do
-				out[k] = (t[1] == "n" and not t.field and map[t[2]]) or t[2]
+				if t[1] == "c" then -- "-- upvalues: u13 (ref)" zeigt die neuen Namen
+					out[k] = (t[2]:gsub("%f[%w_][vup]%d+%f[^%w_]", function(n) return map[n] end))
+				else
+					out[k] = (t[1] == "n" and not t.field and map[t[2]]) or t[2]
+				end
 			end
 			return table.concat(out), count
 		end
