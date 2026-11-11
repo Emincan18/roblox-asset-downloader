@@ -259,20 +259,37 @@ do
 	fallback.FontFace, fallback.TextSize, fallback.TextColor3 = FONT.heavy, 30, ACCENT
 	fallback.Text = "STEALMAXXING"
 	fallback.Parent = head
+	-- Wächter statt einmaligem Laden: Läuft der Server beim Studio-Start noch nicht, wird es weiter versucht.
+	-- Verschwindet das Bild (EditableImage freigegeben), wird es aus den gemerkten Pixeln neu gezeichnet.
 	task.spawn(function()
-		local ok, res = pcall(HttpService.RequestAsync, HttpService,
-			{ Url = SERVER .. "/api/plugin-logo", Headers = PLUGIN_HEADERS, Method = "GET" })
-		if not (ok and res.Success) then return end
-		local size = {}
-		for k, v in res.Headers do size[k:lower()] = tonumber(v) end
-		local w, h = size["x-width"], size["x-height"]
-		if not (w and h and #res.Body == w * h * 4) then return end
-		local okImg, img = pcall(AssetService.CreateEditableImage, AssetService, { Size = Vector2.new(w, h) })
-		if not (okImg and img) then return end
-		img:WritePixelsBuffer(Vector2.zero, Vector2.new(w, h), buffer.fromstring(res.Body))
-		ratio.AspectRatio = w / h
-		head.ImageContent = Content.fromObject(img)
-		fallback.Visible = false
+		local img, pixels, w, h -- img bleibt hier stark referenziert, sonst kann Luau es wegräumen
+		while true do
+			local content = head.ImageContent
+			if not (img and content.SourceType == Enum.ContentSourceType.Object and content.Object == img) then
+				if not pixels then
+					local ok, res = pcall(HttpService.RequestAsync, HttpService,
+						{ Url = SERVER .. "/api/plugin-logo", Headers = PLUGIN_HEADERS, Method = "GET" })
+					if ok and res.Success then
+						local size = {}
+						for k, v in res.Headers do size[k:lower()] = tonumber(v) end
+						if size["x-width"] and size["x-height"] and #res.Body == size["x-width"] * size["x-height"] * 4 then
+							w, h, pixels = size["x-width"], size["x-height"], buffer.fromstring(res.Body)
+						end
+					end
+				end
+				if pixels then
+					local okImg, newImg = pcall(AssetService.CreateEditableImage, AssetService, { Size = Vector2.new(w, h) })
+					if okImg and newImg then
+						newImg:WritePixelsBuffer(Vector2.zero, Vector2.new(w, h), pixels)
+						img = newImg
+						ratio.AspectRatio = w / h
+						head.ImageContent = Content.fromObject(img)
+					end
+				end
+			end
+			fallback.Visible = not (img and head.ImageContent.Object == img)
+			task.wait(img and 5 or 3)
+		end
 	end)
 end
 
@@ -1180,10 +1197,11 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			-- Variablen, deren Spannen sich nicht überschneiden (z. B. in verschiedenen Funktionen), dürfen denselben Namen
 			-- tragen. Deshalb heißen sie überall "player" statt player, player2, player3 …
 			-- Echte Namen: Deklarationen bekommen ebenfalls Spannen; ein Name, der irgendwo global benutzt wird, ist ganz gesperrt.
-			local spans, origDecl, globalNames = {}, {}, {}
+			local spans, origDecl, globalNames, ctxFunc = {}, {}, {}, {}
 			do
 				local blockEnd, stack, nextId = { [0] = #toks }, { 0 }, 0
 				local header, inParams, localList, forVars, forCollect = false, false, false, nil, false
+				local funcName, headerName = {}, nil -- Block-ID einer Funktion -> ihr Name (für Namen wie switchToAnimValue)
 				local origOcc = {}
 				local function note(name, k, block, decl)
 					local list = origOcc[name]
@@ -1198,17 +1216,29 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					if not s then
 						s = { first = k, blocks = {} }
 						spans[name] = s
+						for i = #stack, 1, -1 do -- innerste Funktion mit Namen
+							if funcName[stack[i]] then
+								ctxFunc[name] = funcName[stack[i]]
+								break
+							end
+						end
 					end
 					if k < s.first then s.first = k end
 					s.blocks[block] = true
 				end
 				for k, t in toks do
 					local w = t[2]
+					if header and t[1] == "n" and w ~= "function" then headerName = w end
 					if t[1] == "n" and not t.field then
 						if w == "function" or w == "if" or w == "repeat" or w == "do" then
 							nextId += 1
 							table.insert(stack, nextId)
-							if w == "function" then header, localList = true, false end
+							if w == "function" then
+								header, localList, headerName = true, false, nil
+								local p = prevSignificant(k) -- M.Foo = function(…) / local v5 = function(…)
+								local b = p > 0 and toks[prevSignificant(p)]
+								if toks[p] and toks[p][2] == "=" and b and b[1] == "n" then headerName = b[2] end
+							end
 							if w == "do" and forVars then -- Schleifenvariablen leben im Rumpf der Schleife
 								for _, entry in forVars do
 									if targets[entry[1]] then mark(entry[1], entry[2], nextId) else note(entry[1], entry[2], nextId, true) end
@@ -1248,6 +1278,7 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 						end
 					elseif w == "(" and header then
 						header, inParams = false, true
+						funcName[stack[#stack]] = headerName
 					elseif w == ")" and inParams then
 						inParams = false
 					elseif w == "=" or w == ";" or w == "\n" then
@@ -1453,6 +1484,11 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 
 			-- Gleicher Name nur, wenn sich die Gültigkeitsbereiche nicht überschneiden und kein Originalname im Skript so heißt.
 			local GENERIC = GENERIC_WORDS
+			local ORDINALS = { "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth" }
+			local SKIP_CONTEXT = { game = true, workspace = true, script = true, math = true, task = true, string = true, table = true,
+				Instance = true, Vector3 = true, Vector2 = true, CFrame = true, Color3 = true, UDim2 = true, UDim = true, Enum = true,
+				TweenInfo = true, new = true, tostring = true, tonumber = true, require = true, pcall = true, typeof = true, type = true,
+				ipairs = true, pairs = true, select = true, unpack = true, setmetatable = true, os = true, self = true }
 			local taken = {}
 			local function free(candidate, span)
 				if globalNames[candidate] or KEYWORDS[candidate] or isDecompName(candidate) or candidate:match("^[vup]%d*$") then
@@ -1497,14 +1533,45 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					end
 				end
 				if not chosen then
-					-- Alle Ideen belegt: erst "otherPlayer", erst danach eine Zahl.
+					-- Alle Ideen belegt. Nie eine Zahl: otherPlayer, dann mit Kontext (switchToAnimArg, startTimeAmount),
+					-- dann Ordnungswörter (thirdValue …), zuletzt Buchstaben (valueA, valueB …).
 					local base = specific[1] or "value"
-					chosen = "other" .. base:sub(1, 1):upper() .. base:sub(2)
-					local suffix = 1
-					while not free(chosen, span) do
-						suffix += 1
-						if suffix > 10000 then error("Kein freier Name für " .. name) end -- Notbremse, Skript bleibt dann unverändert
-						chosen = base .. suffix
+					local Base = base:sub(1, 1):upper() .. base:sub(2)
+					local tries = { "other" .. Base }
+					local function compound(word)
+						if type(word) ~= "string" then return end
+						if targets[word] then word = map[word] end
+						if not word or word == base or KEYWORDS[word] or isDecompName(word) or #word > 24 then return end
+						word = lowerFirst(word):gsub("%d+$", "")
+						if word ~= "" and not word:match("^[vup]$") then table.insert(tries, word .. Base) end
+					end
+					compound(ctxFunc[name])
+					local rhs = src:match("local%s+" .. name .. "%s*=%s*([^\n]+)") or src:match("\n[ \t]*" .. name .. "[ \t]*=[ \t]*([^=\n][^\n]*)")
+					if rhs then
+						for word in rhs:gmatch("[%a_][%w_]*") do
+							if word ~= name and not KEYWORDS[word] and not SKIP_CONTEXT[word] then
+								compound(word)
+								break
+							end
+						end
+					end
+					for _, ordinal in ORDINALS do table.insert(tries, ordinal .. Base) end
+					for _, candidate in tries do
+						if free(candidate, span) then
+							chosen = candidate
+							break
+						end
+					end
+					local n = 0
+					while not chosen do
+						n += 1
+						if n > 100000 then error("Kein freier Name für " .. name) end -- Notbremse, Skript bleibt dann unverändert
+						local letters, x = "", n
+						repeat
+							letters = string.char(65 + (x - 1) % 26) .. letters
+							x = (x - 1) // 26
+						until x == 0
+						if free(base .. letters, span) then chosen = base .. letters end
 					end
 				end
 				taken[chosen] = taken[chosen] or {}
