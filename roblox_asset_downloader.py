@@ -269,6 +269,9 @@ def main():
             else:
                 path = out_dir / f"{asset_id}.{guess_ext(data)}"
                 path.write_bytes(data)
+                from roblox_mesh import extra_files  # Meshes zusätzlich als OBJ und GLB
+                for extra, extra_data in extra_files(data, path.name):
+                    (out_dir / extra).write_bytes(extra_data)
                 row = [asset_id, "ok", f"{len(data):,} Bytes", path.name]
                 ok += 1
             w.writerow(row)

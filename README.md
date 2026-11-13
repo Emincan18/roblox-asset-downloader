@@ -106,6 +106,7 @@ Lädt alles nach `downloads/`. Mit `-o ORDNER` kannst du einen anderen Zielordne
 
 - Erkannt werden IDs, `rbxassetid://`-Links, Catalog-, Library-, Bundle- und Creator-Store-Links.
 - Dateien heißen `Name (ID).endung`. Die Endung wird am Inhalt erkannt (`.rbxm`, `.rbxmx`, `.ogg`, `.mp3`, `.png`, `.mesh` …).
+- Meshes kommen zusätzlich als `.obj` und `.glb`. Beide öffnen Blender und Roblox Studio (Import 3D). OBJ hat Form, UVs und Normalen; GLB hat dazu Knochen und Gewichte, falls das Mesh geriggt ist. Neue Meshes (Version 7.00) brauchen dafür das Python-Paket `DracoPy`; ohne es bleibt nur die `.mesh`.
 - Viele Animationen und Sounds gibt Roblox nur im Kontext des Spiels heraus, das sie benutzen darf. Das Tool probiert automatisch die Spiele des Erstellers, bei Gruppen auch private Test-Places, bei Usern auch die Spiele ihrer eigenen Gruppen. Klappt es über ein Spiel, merkt es sich das in `places.txt` und nutzt es für alle weiteren Assets. Beim Bulk-Download bekommen Fehlschläge deshalb eine zweite Runde.
 - Wenn trotzdem „Kein Zugriff“ kommt: Im Feld **Spiel** den Link des Spiels einfügen, aus dem die IDs stammen (Kommandozeile: `--place LINK`).
 - „Privates Audio“ heißt, der Ersteller hat das Audio privat gestellt. Roblox gibt es nur ihm oder Spielen, die er freigegeben hat, auch im Spielkontext nicht. Das lässt sich nicht herunterladen.

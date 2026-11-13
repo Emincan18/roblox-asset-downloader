@@ -29,6 +29,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from roblox_asset_downloader import extract_ids, fetch, fetch_many, guess_ext, load_cookie, parse_place
+from roblox_mesh import extra_files
 
 PORT = 47651  # 8765 benutzt das Blender-MCP-Addon, dann landeten Browser und Plugin bei Blender.
 DOWNLOADS = Path(__file__).with_name("downloads")
@@ -421,6 +422,8 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 name = file_name(asset_id, data)
                 z.writestr(name, data)
+                for extra, extra_data in extra_files(data, name):  # Meshes zusätzlich als OBJ und GLB
+                    z.writestr(extra, extra_data)
                 w.writerow([asset_id, "ok", name])
                 ok += 1
             z.writestr("report.csv", "﻿" + report.getvalue())  # BOM, damit Excel Umlaute erkennt
@@ -450,7 +453,10 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 errors.append({"id": asset_id, "error": err})
             else:
-                (out / file_name(asset_id, data, name)).write_bytes(data)
+                target = file_name(asset_id, data, name)
+                (out / target).write_bytes(data)
+                for extra, extra_data in extra_files(data, target):  # Meshes zusätzlich als OBJ und GLB
+                    (out / extra).write_bytes(extra_data)
         self.send(200, json.dumps({"saved": len(ids) - len(errors), "total": len(ids), "folder": str(out), "errors": errors}).encode())
 
     def log_message(self, *args):
