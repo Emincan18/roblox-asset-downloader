@@ -28,7 +28,8 @@ from functools import lru_cache
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from roblox_asset_downloader import extract_ids, fetch, fetch_many, guess_ext, load_cookie, parse_place
+from roblox_asset_downloader import extract_ids, fetch, fetch_many, guess_ext, ids_in_model, load_cookie, parse_place
+from roblox_mesh import convert, extra_files
 
 PORT = 47651  # 8765 benutzt das Blender-MCP-Addon, dann landeten Browser und Plugin bei Blender.
 DOWNLOADS = Path(__file__).with_name("downloads")
@@ -272,6 +273,64 @@ def plugin_logo():
     return _logo_cache
 
 
+_auth = {"time": 0.0, "user": None, "cookie": None}
+
+
+def auth_user():
+    """Eingeloggter Roblox-User aus cookie.txt ({id, name}) oder None, wenn der Cookie fehlt oder abgelaufen ist.
+    60 Sekunden gemerkt, damit die Webseite nicht bei jedem Aufruf Roblox fragt."""
+    cookie = load_cookie()
+    if cookie == _auth["cookie"] and time.time() - _auth["time"] < 60:
+        return _auth["user"]
+    user = None
+    if cookie:
+        req = urllib.request.Request("https://users.roblox.com/v1/users/authenticated",
+                                     headers={"Cookie": ".ROBLOSECURITY=" + cookie, "User-Agent": "Roblox/WinInet"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as res:
+                d = json.load(res)
+                user = {"id": d.get("id"), "name": d.get("name")}
+        except Exception:
+            user = None
+    _auth.update(time=time.time(), user=user, cookie=cookie)
+    return user
+
+
+def thumbnail(asset_id):
+    """Vorschaubild-URL von Roblox (420x420), sonst None."""
+    url = f"https://thumbnails.roblox.com/v1/assets?assetIds={asset_id}&returnPolicy=PlaceHolder&size=420x420&format=Png"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as res:
+            rows = json.load(res).get("data") or []
+        return rows[0].get("imageUrl") if rows and rows[0].get("state") == "Completed" else None
+    except Exception:
+        return None
+
+
+def zip_results(results, first=()):
+    """ZIP aus (id, data, err)-Ergebnissen plus report.csv; Meshes zusätzlich als OBJ und GLB.
+    first: (name, bytes)-Paare, die vorne in die ZIP kommen (z. B. das Model selbst). Gibt (bytes, ok)."""
+    buf, report = io.BytesIO(), io.StringIO()
+    w = csv.writer(report)
+    w.writerow(["id", "status", "datei / fehler"])
+    ok = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in first:
+            z.writestr(name, data)
+        for asset_id, data, err in results:
+            if err:
+                w.writerow([asset_id, "fehler", err])
+                continue
+            name = file_name(asset_id, data, asset_info(asset_id)[0])
+            z.writestr(name, data)
+            for extra, extra_data in extra_files(data, name):  # Meshes zusätzlich als OBJ und GLB
+                z.writestr(extra, extra_data)
+            w.writerow([asset_id, "ok", name])
+            ok += 1
+        z.writestr("report.csv", "\ufeff" + report.getvalue())  # BOM, damit Excel Umlaute erkennt
+    return buf.getvalue(), ok
+
+
 def file_name(asset_id, data, name=None):
     if name is None:
         name, _ = asset_info(asset_id)
@@ -310,8 +369,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/":
             self.send(200, PAGE.encode(), "text/html; charset=utf-8")
+        elif url.path == "/logo.png":
+            self.send(200, LOGO_FILE.read_bytes(), "image/png") if LOGO_FILE.is_file() else self.error(404, "Kein Logo")
         elif url.path == "/api/status":
-            self.send(200, json.dumps({"login": bool(load_cookie())}).encode())
+            try:
+                import DracoPy  # noqa: F401
+                draco = True
+            except ImportError:
+                draco = False
+            user = auth_user()
+            # login bleibt für ältere Plugins: nur "cookie.txt ist da". user sagt, ob Roblox den Cookie annimmt.
+            self.send(200, json.dumps({"login": bool(load_cookie()), "user": user, "draco": draco,
+                                       "apikey": API_KEY_FILE.is_file()}).encode())
+        elif url.path == "/api/info":
+            # Webseite: Name, Typ, Ersteller und Vorschaubild zu einer ID.
+            ids = extract_ids(q.get("q", [""])[0], bare=True)
+            if not ids:
+                return self.error(400, "Keine gültige Asset-ID gefunden.")
+            d = asset_details(ids[0])
+            creator = (d.get("Creator") or {}).get("Name")
+            self.send(200, json.dumps({"id": ids[0], "name": d.get("Name") or ids[0], "type": ASSET_TYPES.get(d.get("AssetTypeId"), ""),
+                                       "creator": creator, "thumb": thumbnail(ids[0])}).encode())
         elif url.path == "/api/download":
             ids = extract_ids(q.get("q", [""])[0], bare=True)
             if not ids:
@@ -319,7 +397,40 @@ class Handler(BaseHTTPRequestHandler):
             data, err = fetch(ids[0], load_cookie(), parse_place(q.get("place", [""])[0]))
             if err:
                 return self.error(502, err)
-            self.send(200, data, "application/octet-stream", file_name(ids[0], data))
+            name = file_name(ids[0], data, asset_info(ids[0])[0])
+            wanted = q.get("format", [""])[0]
+            if wanted in ("obj", "glb"):
+                # Mesh als OBJ oder GLB statt .mesh (Blender, Studio > Import 3D)
+                try:
+                    obj, glb = convert(data, name.rsplit(".", 1)[0])
+                except Exception as e:
+                    return self.error(422, f"Kein umwandelbares Mesh ({e})")
+                stem = name.rsplit(".", 1)[0]
+                return self.send(200, obj.encode() if wanted == "obj" else glb, "application/octet-stream", f"{stem}.{wanted}")
+            self.send(200, data, "application/octet-stream", name, {"X-Ext": guess_ext(data)})
+        elif url.path == "/api/model":
+            # Webseite: eine oder mehrere IDs (Models, Meshes, Texturen gemischt) -> eine ZIP. Models werden aufgeklappt:
+            # alles, was darin steckt, kommt mit. Meshes zusätzlich als OBJ/GLB.
+            ids = extract_ids(q.get("q", [""])[0], bare=True)
+            if not ids:
+                return self.error(400, "Keine gültige Asset-ID gefunden.")
+            place = parse_place(q.get("place", [""])[0])
+            results = fetch_many(ids, load_cookie(), place)
+            inner, seen = [], set(ids)
+            for _, data, err in results:
+                if not err and guess_ext(data) in ("rbxm", "rbxmx"):
+                    for i in ids_in_model(data):
+                        if i not in seen:
+                            seen.add(i)
+                            inner.append(i)
+            if inner:
+                results += fetch_many(inner, load_cookie(), place)
+            if len(ids) == 1 and not results[0][2]:
+                zip_name = file_name(ids[0], results[0][1], asset_info(ids[0])[0]).rsplit(".", 1)[0] + ".zip"
+            else:
+                zip_name = f"roblox-assets-{len(results)}.zip"
+            body, ok = zip_results(results)
+            self.send(200, body, "application/zip", zip_name, {"X-Result": f"{ok}/{len(results)}"})
         elif url.path == "/api/plugin-upload":
             # Plugin: Bild, Animation, Sound oder Mesh unter eigenem Namen neu hochladen (Studio selbst darf das nicht).
             ids = extract_ids(q.get("q", [""])[0], bare=True)
@@ -409,22 +520,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.plugin_save(ids, place, urllib.parse.parse_qs(url.query).get("folder", [""])[0])
         if not ids:
             return self.error(400, "Keine gültigen Asset-IDs gefunden.")
-        results = fetch_many(ids, load_cookie(), place)
-        buf, report = io.BytesIO(), io.StringIO()
-        w = csv.writer(report)
-        w.writerow(["id", "status", "datei / fehler"])
-        ok = 0
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for asset_id, data, err in results:
-                if err:
-                    w.writerow([asset_id, "fehler", err])
-                    continue
-                name = file_name(asset_id, data)
-                z.writestr(name, data)
-                w.writerow([asset_id, "ok", name])
-                ok += 1
-            z.writestr("report.csv", "﻿" + report.getvalue())  # BOM, damit Excel Umlaute erkennt
-        self.send(200, buf.getvalue(), "application/zip", f"roblox-assets-{ok}.zip", {"X-Result": f"{ok}/{len(ids)}"})
+        body, ok = zip_results(fetch_many(ids, load_cookie(), place))
+        self.send(200, body, "application/zip", f"roblox-assets-{ok}.zip", {"X-Result": f"{ok}/{len(ids)}"})
 
     def plugin_bulk(self, ids):
         """Für das Studio-Plugin: nur Namen und Typen, damit die Liste schnell da ist.
@@ -445,13 +542,20 @@ class Handler(BaseHTTPRequestHandler):
         results = fetch_many(ids, load_cookie(), place)
         with ThreadPoolExecutor(max_workers=6) as pool:
             names = [n for n, _ in pool.map(asset_info, ids)]
-        errors = []
+        errors, files = [], {}
         for (asset_id, data, err), name in zip(results, names):
             if err:
                 errors.append({"id": asset_id, "error": err})
             else:
-                (out / file_name(asset_id, data, name)).write_bytes(data)
-        self.send(200, json.dumps({"saved": len(ids) - len(errors), "total": len(ids), "folder": str(out), "errors": errors}).encode())
+                target = file_name(asset_id, data, name)
+                (out / target).write_bytes(data)
+                files[asset_id] = [target]
+                for extra, extra_data in extra_files(data, target):  # Meshes zusätzlich als OBJ und GLB
+                    (out / extra).write_bytes(extra_data)
+                    files[asset_id].append(extra)
+        # files: welche Datei(en) zu welcher ID gehören, damit das Plugin eine model.json mit echten Dateinamen schreibt
+        self.send(200, json.dumps({"saved": len(ids) - len(errors), "total": len(ids), "folder": str(out), "errors": errors,
+                                   "files": files}).encode())
 
     def log_message(self, *args):
         pass  # Konsole ruhig halten
@@ -459,106 +563,383 @@ class Handler(BaseHTTPRequestHandler):
 
 PAGE = r"""<!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Roblox Asset Downloader</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<title>Stealmaxxing · Roblox Asset Downloader</title>
+<link rel="icon" href="/logo.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-:root { --bg:#eef1f5; --panel:#fff; --fg:#18202b; --muted:#5d6878; --line:#d5dbe4; --accent:#0b6bcb; --accent-fg:#fff;
-  --ok:#1f7a4a; --bad:#b4372f; --display:"Familjen Grotesk","Segoe UI",sans-serif; --body:"IBM Plex Sans","Segoe UI",sans-serif; --mono:"IBM Plex Mono",Consolas,monospace; }
-@media (prefers-color-scheme: dark) { :root { --bg:#11161d; --panel:#19212b; --fg:#e4e9f0; --muted:#93a0b2; --line:#2b3542;
-  --accent:#4ea1f3; --accent-fg:#0b1420; --ok:#5ccf8f; --bad:#f08077; color-scheme:dark; } }
-body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 var(--body); }
-.wrap { max-width:720px; margin:0 auto; padding:48px 16px; display:grid; gap:22px; }
-h1 { font-family:var(--display); font-size:2.3rem; margin:0; line-height:1.1; }
-.sub { color:var(--muted); margin:6px 0 0; }
-.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px; display:grid; gap:12px; }
-.label { font-size:.72rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); }
-.row { display:flex; gap:10px; flex-wrap:wrap; }
-input, textarea { flex:1; min-width:0; font:14px var(--mono); background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:12px; }
-textarea { min-height:140px; resize:vertical; }
-button { font:500 15px var(--body); background:var(--accent); color:var(--accent-fg); border:0; border-radius:8px; padding:12px 22px; cursor:pointer; }
-button:disabled { opacity:.6; cursor:wait; }
-:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.msg { min-height:1.4em; font-size:.92rem; }
+:root { color-scheme: dark;
+  --bg:#000; --card:#1a1415; --field:#2b2022; --line:#40282b; --text:#fff; --muted:#b09ea0;
+  --accent:#e21b26; --accent-hi:#ff3540; --thumb:#7a161e; --grey:#3e2e30; --ok:#30d158; --bad:#ff9f0a;
+  --font:"Inter",system-ui,"Segoe UI",sans-serif; --mono:"JetBrains Mono",Consolas,monospace; }
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 var(--font); -webkit-font-smoothing:antialiased; }
+.wrap { max-width:760px; margin:0 auto; padding:24px 16px 64px; display:grid; gap:14px; }
+.logo { width:100%; max-width:560px; justify-self:center; display:block; aspect-ratio:760/348; object-fit:contain; }
+.logo-text { display:none; text-align:center; font-weight:800; font-size:2.4rem; color:var(--accent); letter-spacing:.04em; }
+.pills { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+.pill { display:inline-flex; align-items:center; gap:6px; background:var(--card); border:1px solid var(--line); border-radius:999px;
+  padding:5px 12px; font-size:.82rem; color:var(--muted); }
+.pill b { color:var(--text); font-weight:600; }
+.dot { width:8px; height:8px; border-radius:50%; background:var(--muted); }
+.dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); }
+.tabs { position:relative; display:flex; background:var(--card); border-radius:11px; padding:3px; }
+.tabs button { flex:1; position:relative; z-index:1; background:none; border:0; color:var(--muted); font:600 14px var(--font);
+  padding:9px 4px; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:color .2s; }
+.tabs button[aria-selected=true] { color:var(--text); }
+.tabs .thumb { position:absolute; top:3px; bottom:3px; left:3px; background:var(--thumb); border-radius:8px;
+  transition:transform .38s cubic-bezier(.22,1,.36,1), width .38s cubic-bezier(.22,1,.36,1); }
+@media (prefers-reduced-motion:reduce) { .tabs .thumb { transition:none; } }
+.page { display:none; gap:14px; animation:in .3s ease-out; } .page.on { display:grid; }
+@keyframes in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion:reduce) { .page { animation:none; } }
+.card { background:var(--card); border-radius:16px; padding:18px; display:grid; gap:12px; }
+.card h2 { margin:0; font-size:1.05rem; font-weight:800; }
+.card p.sub { margin:-6px 0 0; color:var(--muted); font-size:.88rem; }
+.row { display:flex; gap:8px; flex-wrap:wrap; }
+.row > input { flex:1 1 220px; }
+input, textarea { min-width:0; width:100%; font:14px var(--mono); background:var(--field); color:var(--text); border:1px solid transparent;
+  border-radius:10px; padding:11px 12px; }
+input::placeholder, textarea::placeholder { color:#86777a; }
+textarea { min-height:130px; resize:vertical; }
+input:focus, textarea:focus { border-color:var(--accent); outline:none; }
+.btn { font:600 14px var(--font); border:0; border-radius:10px; padding:11px 18px; cursor:pointer; color:#fff; background:var(--grey);
+  display:inline-flex; align-items:center; justify-content:center; gap:8px; transition:background .15s, transform .1s; }
+.btn:hover { background:#52393c; } .btn:active { transform:scale(.98); }
+.btn.main { background:var(--accent); } .btn.main:hover { background:var(--accent-hi); }
+.btn:disabled { opacity:.55; cursor:wait; transform:none; }
+.btn.wide { width:100%; }
+:focus-visible { outline:2px solid var(--accent-hi); outline-offset:2px; }
+svg.i { width:17px; height:17px; flex:none; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.msg { min-height:1.2em; font-size:.9rem; color:var(--muted); white-space:pre-line; }
 .msg.ok { color:var(--ok); } .msg.bad { color:var(--bad); }
-.status { font-size:.85rem; color:var(--muted); }
-.status b { color:var(--ok); } .status b.no { color:var(--bad); }
+details.place summary { cursor:pointer; color:var(--muted); font-size:.88rem; list-style:none; display:flex; align-items:center; gap:6px; }
+details.place summary::-webkit-details-marker { display:none; }
+details.place[open] summary { margin-bottom:10px; }
+.preview { display:grid; grid-template-columns:180px 1fr; gap:16px; align-items:start; }
+@media (max-width:560px) { .preview { grid-template-columns:1fr; } }
+.media { aspect-ratio:1; background:var(--field); border-radius:12px; overflow:hidden; display:grid; place-items:center; color:var(--muted); font-size:.85rem; }
+.media img { width:100%; height:100%; object-fit:contain; }
+.media model-viewer { width:100%; height:100%; --poster-color:transparent; }
+.media audio { width:92%; }
+.meta { display:grid; gap:6px; min-width:0; }
+.meta .name { font-size:1.15rem; font-weight:800; overflow-wrap:anywhere; }
+.badge { display:inline-block; background:var(--thumb); color:#fff; border-radius:6px; padding:1px 8px; font-size:.78rem; font-weight:600; }
+.meta .small { color:var(--muted); font-size:.85rem; font-family:var(--mono); }
+.actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+.list { display:grid; gap:6px; max-height:420px; overflow:auto; }
+.item { display:grid; grid-template-columns:auto 1fr auto; gap:10px; align-items:center; background:var(--field); border-radius:10px; padding:9px 12px; }
+.item input { width:auto; accent-color:var(--accent); }
+.item .n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.item .t { color:var(--muted); font-size:.8rem; font-family:var(--mono); }
+.item.done .t { color:var(--ok); } .item.fail .t { color:var(--bad); }
+.listhead { display:flex; justify-content:space-between; align-items:center; color:var(--muted); font-size:.85rem; }
+.link { background:none; border:0; color:var(--accent-hi); font:600 .85rem var(--font); cursor:pointer; padding:0; }
+ul.facts { margin:0; padding-left:18px; color:var(--muted); font-size:.88rem; display:grid; gap:2px; }
+.spin { animation:spin 1s linear infinite; } @keyframes spin { to { transform:rotate(360deg); } }
 </style></head><body>
 <div class="wrap">
-  <header>
-    <h1>Roblox Asset Downloader</h1>
-    <p class="sub">Asset-ID oder Link eingeben und herunterladen. Models, Audio, Animationen, Accessories, Bilder und Meshes.</p>
-    <p class="status" id="status"></p>
-  </header>
+  <img class="logo" src="/logo.png" alt="Stealmaxxing" onerror="this.style.display='none'; document.querySelector('.logo-text').style.display='block'">
+  <div class="logo-text">STEALMAXXING</div>
+  <div class="pills" id="pills"><span class="pill"><span class="dot"></span>Prüfe Server …</span></div>
 
-  <div class="card">
-    <label class="label" for="place">Spiel, aus dem die Assets stammen (optional)</label>
+  <div class="tabs" role="tablist" id="tabs"><div class="thumb" id="thumb"></div></div>
+
+  <details class="place card">
+    <summary><svg class="i" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      Spiel-Link für gesperrte Assets (optional)</summary>
     <input id="place" placeholder="z. B. https://www.roblox.com/games/2809202155/..." autocomplete="off">
-    <p class="status">Manche Animationen und Sounds gibt Roblox nur im Kontext ihres Spiels heraus. Ein Spiel, über das es einmal geklappt hat, merkt sich das Tool.</p>
-  </div>
+    <p class="sub" style="margin:0">Manche Animationen und Sounds gibt Roblox nur im Kontext ihres Spiels heraus. Ein Spiel, über das es einmal geklappt hat, merkt sich das Tool.</p>
+  </details>
 
-  <form class="card" id="one">
-    <label class="label" for="q">Asset-ID oder Link</label>
-    <div class="row">
-      <input id="q" placeholder="z. B. 85757655830137" autocomplete="off" autofocus>
-      <button id="oneBtn">Download</button>
+  <!-- Laden -->
+  <section class="page" data-tab="Laden">
+    <form class="card" id="loadForm">
+      <h2>Asset laden</h2>
+      <p class="sub">ID oder Link einfügen. Meshes drehen sich in 3D, Sounds spielen, Bilder erscheinen.</p>
+      <div class="row">
+        <input id="q" placeholder="z. B. 85757655830137" autocomplete="off" autofocus>
+        <button class="btn main" id="loadBtn"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Laden</button>
+      </div>
+      <div class="msg" id="loadMsg"></div>
+    </form>
+    <div class="card" id="previewCard" hidden>
+      <div class="preview">
+        <div class="media" id="media"></div>
+        <div class="meta">
+          <div class="name" id="pName"></div>
+          <div><span class="badge" id="pType"></span></div>
+          <div class="small" id="pInfo"></div>
+          <div class="actions" id="pActions"></div>
+          <div class="msg" id="pMsg"></div>
+        </div>
+      </div>
     </div>
-    <div class="msg" id="oneMsg"></div>
-  </form>
+  </section>
 
-  <form class="card" id="bulk">
-    <label class="label" for="list">Bulk-Download: viele IDs oder Links, eine pro Zeile</label>
-    <textarea id="list" placeholder="1843463175&#10;https://www.roblox.com/catalog/16630147/...&#10;rbxassetid://507766388"></textarea>
-    <div class="row"><button id="bulkBtn">Alle als ZIP laden</button></div>
-    <div class="msg" id="bulkMsg"></div>
-  </form>
+  <!-- Bulk -->
+  <section class="page" data-tab="Bulk">
+    <div class="card">
+      <h2>Viele Assets auf einmal</h2>
+      <p class="sub">Eine ID oder ein Link pro Zeile. Meshes kommen zusätzlich als OBJ und GLB.</p>
+      <textarea id="list" placeholder="1843463175&#10;https://www.roblox.com/catalog/16630147/...&#10;rbxassetid://507766388"></textarea>
+      <button class="btn main wide" id="listBtn"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h.01M3 18h.01M3 6h.01M8 12h13M8 18h13M8 6h13"/></svg>Liste laden</button>
+      <div class="msg" id="listMsg"></div>
+    </div>
+    <div class="card" id="bulkCard" hidden>
+      <div class="listhead"><span id="bulkCount"></span><button class="link" id="toggleAll">Alle abwählen</button></div>
+      <div class="list" id="bulkList"></div>
+      <div class="row">
+        <button class="btn main" id="zipBtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>Als ZIP</button>
+        <input id="folder" placeholder="Ordnername (leer = downloads/)" style="flex:1 1 180px">
+        <button class="btn" id="saveBtn"><svg class="i" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>In Ordner speichern</button>
+      </div>
+      <div class="msg" id="bulkMsg"></div>
+    </div>
+  </section>
+
+  <!-- Model -->
+  <section class="page" data-tab="Model">
+    <form class="card" id="modelForm">
+      <h2>Ganzes Model herunterladen</h2>
+      <p class="sub">Model-ID, oder die IDs aus dem Plugin (Mesh, Texturen …) einfach alle hier rein. Du bekommst eine ZIP mit allem; Models werden aufgeklappt.</p>
+      <div class="row">
+        <input id="mq" placeholder="Model-ID oder mehrere IDs" autocomplete="off">
+        <button class="btn main" id="modelBtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>Alles als ZIP</button>
+      </div>
+      <ul class="facts">
+        <li>das Model als .rbxm (Studio: Rechtsklick › Insert from File)</li>
+        <li>jedes Mesh als .obj und .glb (Blender oder Studio › Import 3D, .glb mit Knochen)</li>
+        <li>Texturen, Sounds und Animationen, dazu report.csv</li>
+      </ul>
+      <div class="msg" id="modelMsg"></div>
+    </form>
+  </section>
+
+  <!-- Hochladen -->
+  <section class="page" data-tab="Hochladen">
+    <div class="card">
+      <h2>Unter meinem Account hochladen</h2>
+      <p class="sub">Fremde Bilder, Sounds, Meshes und Animationen laufen in deinem Spiel nicht. Hier lädst du sie unter deinem Account neu hoch und bekommst die neuen IDs. Braucht apikey.txt.</p>
+      <textarea id="upList" placeholder="Eine ID pro Zeile"></textarea>
+      <button class="btn main wide" id="upBtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>Hochladen</button>
+      <div class="msg" id="upMsg"></div>
+      <div class="list" id="upResults"></div>
+      <button class="btn" id="copyBtn" hidden><svg class="i" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>Neue IDs kopieren (alt → neu)</button>
+    </div>
+  </section>
 </div>
 <script>
 const $ = id => document.getElementById(id);
-const place = () => "&place=" + encodeURIComponent($("place").value.trim());
+const H = { "X-Asset-Downloader": "plugin" }; // gleiche Seite, darf die Plugin-Endpunkte nutzen
+const placeQ = () => "&place=" + encodeURIComponent($("place").value.trim());
+let status = {};
 try { $("place").value = localStorage.getItem("place") || ""; } catch {}
 $("place").onchange = () => { try { localStorage.setItem("place", $("place").value.trim()); } catch {} };
 
-fetch("/api/status").then(r => r.json()).then(s => {
-  $("status").innerHTML = s.login
-    ? "Login: <b>aktiv</b> (cookie.txt gefunden)"
-    : 'Login: <b class="no">fehlt</b>. Neue Assets brauchen cookie.txt neben dem Script.';
-});
+// Tabs mit gleitendem Daumen wie im Plugin
+const TABS = { Laden: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4|m7 10 5 5 5-5|M12 15V3", Bulk: "M3 12h.01M3 18h.01M3 6h.01M8 12h13M8 18h13M8 6h13",
+  Model: "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z|m3.3 7 8.7 5 8.7-5|M12 22V12",
+  Hochladen: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4|m17 8-5-5-5 5|M12 3v12" };
+const icon = d => '<svg class="i" viewBox="0 0 24 24">' + d.split("|").map(p => '<path d="' + p + '"/>').join("") + "</svg>";
+for (const name in TABS) {
+  const b = document.createElement("button");
+  b.type = "button"; b.setAttribute("role", "tab"); b.innerHTML = icon(TABS[name]) + "<span>" + name + "</span>"; b.dataset.tab = name;
+  b.onclick = () => show(name);
+  $("tabs").appendChild(b);
+}
+function show(name) {
+  document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === name));
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("on", p.dataset.tab === name));
+  const b = document.querySelector('.tabs button[data-tab="' + name + '"]');
+  $("thumb").style.width = b.offsetWidth + "px";
+  $("thumb").style.transform = "translateX(" + (b.offsetLeft - 3) + "px)";
+  try { localStorage.setItem("tab", name); } catch {}
+}
+window.addEventListener("resize", () => show(document.querySelector(".tabs button[aria-selected=true]").dataset.tab));
+let startTab = "Laden"; try { startTab = TABS[localStorage.getItem("tab")] ? localStorage.getItem("tab") : "Laden"; } catch {}
+show(startTab);
 
-async function save(res, msgEl, okText) {
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({ error: "HTTP " + res.status }));
-    msgEl.className = "msg bad"; msgEl.textContent = e.error; return;
+function say(el, text, kind) { el.className = "msg" + (kind ? " " + kind : ""); el.textContent = text; }
+async function errorText(res) { const e = await res.json().catch(() => ({})); return e.error || ("HTTP " + res.status); }
+function busy(btn, on, text) {
+  if (on) { btn.dataset.html = btn.innerHTML; btn.disabled = true;
+    btn.innerHTML = '<svg class="i spin" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>' + text; }
+  else { btn.disabled = false; btn.innerHTML = btn.dataset.html; }
+}
+function saveBlob(blob, name) {
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+}
+const fileName = res => decodeURIComponent(res.headers.get("X-Filename") || "asset.bin");
+
+// Status oben: Login wirklich gültig, DracoPy, API-Key
+async function loadStatus() {
+  try { status = await (await fetch("/api/status")).json(); } catch { $("pills").innerHTML = '<span class="pill"><span class="dot bad"></span>Server nicht erreichbar: start.bat starten</span>'; return; }
+  const pill = (ok, label, text) => '<span class="pill"><span class="dot ' + (ok ? "ok" : "bad") + '"></span>' + label + " <b>" + text + "</b></span>";
+  $("pills").innerHTML =
+    pill(!!status.user, "Login", status.user ? status.user.name : (status.login ? "abgelaufen: cookie.txt erneuern" : "fehlt: cookie.txt")) +
+    pill(status.draco, "Meshes", status.draco ? "OBJ + GLB" : "pip install DracoPy") +
+    pill(status.apikey, "Hochladen", status.apikey ? "bereit" : "apikey.txt fehlt");
+}
+loadStatus();
+
+// Laden
+let viewerReady;
+function viewer() { return viewerReady ||= import("https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"); }
+let current = null;
+$("loadForm").onsubmit = async e => {
+  e.preventDefault();
+  const q = $("q").value.trim(); if (!q) return;
+  busy($("loadBtn"), true, "Lade …"); say($("loadMsg"), "");
+  try {
+    const infoRes = await fetch("/api/info?q=" + encodeURIComponent(q));
+    if (!infoRes.ok) { say($("loadMsg"), await errorText(infoRes), "bad"); return; }
+    const info = await infoRes.json();
+    const res = await fetch("/api/download?q=" + encodeURIComponent(q) + placeQ());
+    if (!res.ok) { say($("loadMsg"), await errorText(res), "bad"); showPreview(info, null); return; }
+    current = { info, blob: await res.blob(), name: fileName(res), ext: res.headers.get("X-Ext") || "" };
+    showPreview(info, current);
+  } catch { say($("loadMsg"), "Server nicht erreichbar. Läuft start.bat?", "bad"); }
+  finally { busy($("loadBtn"), false); }
+};
+function btn(text, path, main, onclick) {
+  const b = document.createElement("button"); b.type = "button"; b.className = "btn" + (main ? " main" : "");
+  b.innerHTML = icon(path) + text; b.onclick = () => onclick(b); return b;
+}
+const DL = "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4|m7 10 5 5 5-5|M12 15V3";
+async function showPreview(info, file) {
+  $("previewCard").hidden = false;
+  $("pName").textContent = info.name; $("pType").textContent = info.type || (file ? file.ext.toUpperCase() : "Asset");
+  $("pInfo").textContent = "ID " + info.id + (info.creator ? " · von " + info.creator : "");
+  say($("pMsg"), file ? "" : "Nur die Infos: Datei selbst nicht ladbar (siehe oben).", file ? "" : "bad");
+  const media = $("media"); media.innerHTML = "";
+  const actions = $("pActions"); actions.innerHTML = "";
+  const thumb = () => { media.innerHTML = info.thumb ? '<img alt="" src="' + info.thumb + '">' : "Keine Vorschau"; };
+  if (!file) { thumb(); return; }
+  actions.append(btn("Herunterladen", DL, true, () => saveBlob(file.blob, file.name)));
+  if (file.ext === "mesh") {
+    for (const fmt of ["obj", "glb"]) actions.append(btn(fmt.toUpperCase(), DL, false, b => downloadUrl(b, "/api/download?format=" + fmt + "&q=" + info.id + placeQ())));
+    media.textContent = "3D-Vorschau lädt …";
+    try {
+      await viewer();
+      const glb = await fetch("/api/download?format=glb&q=" + info.id + placeQ());
+      if (!glb.ok) throw 0;
+      const mv = document.createElement("model-viewer");
+      mv.src = URL.createObjectURL(await glb.blob()); mv.setAttribute("camera-controls", ""); mv.setAttribute("auto-rotate", "");
+      mv.setAttribute("shadow-intensity", "0.6"); mv.setAttribute("exposure", "1.1"); mv.alt = info.name;
+      media.innerHTML = ""; media.append(mv);
+    } catch { thumb(); }
+  } else if (["png", "jpg", "webp"].includes(file.ext)) {
+    media.innerHTML = '<img alt="">'; media.firstChild.src = URL.createObjectURL(file.blob);
+  } else if (["ogg", "mp3", "wav", "flac"].includes(file.ext)) {
+    media.innerHTML = "<audio controls></audio>"; media.firstChild.src = URL.createObjectURL(file.blob);
+  } else {
+    thumb();
   }
-  const name = decodeURIComponent(res.headers.get("X-Filename") || "asset.bin");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(await res.blob());
-  a.download = name; a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  msgEl.className = "msg ok"; msgEl.textContent = okText(name, res);
+  if ((info.type === "Model" || file.ext === "rbxm" || file.ext === "rbxmx") && !/Animation|Emote/.test(info.type))
+    actions.append(btn("Model komplett (ZIP)", TABS.Model, false, b => downloadUrl(b, "/api/model?q=" + info.id + placeQ(), $("pMsg"))));
+}
+async function downloadUrl(b, url, msgEl) {
+  busy(b, true, "Lade …");
+  try {
+    const res = await fetch(url);
+    if (!res.ok) { say(msgEl || $("pMsg"), await errorText(res), "bad"); return; }
+    saveBlob(await res.blob(), fileName(res));
+    const r = res.headers.get("X-Result");
+    say(msgEl || $("pMsg"), "Gespeichert: " + fileName(res) + (r ? " (" + r + " Assets darin)" : ""), "ok");
+  } catch { say(msgEl || $("pMsg"), "Server nicht erreichbar.", "bad"); }
+  finally { busy(b, false); }
 }
 
-async function run(btn, msgEl, label, job) {
-  btn.disabled = true; msgEl.className = "msg"; msgEl.textContent = label;
-  try { await job(); } catch (e) { msgEl.className = "msg bad"; msgEl.textContent = "Server nicht erreichbar. Läuft roblox_asset_web.py?"; }
-  btn.disabled = false;
-}
-
-$("one").onsubmit = e => {
-  e.preventDefault();
-  const q = $("q").value.trim();
-  if (!q) return;
-  run($("oneBtn"), $("oneMsg"), "Lade …", async () =>
-    save(await fetch("/api/download?q=" + encodeURIComponent(q) + place()), $("oneMsg"), n => "Gespeichert: " + n));
+// Bulk
+let bulk = [];
+$("listBtn").onclick = async () => {
+  const text = $("list").value.trim(); if (!text) return;
+  busy($("listBtn"), true, "Lade Liste …"); say($("listMsg"), "");
+  try {
+    const res = await fetch("/api/plugin-bulk?x=1" + placeQ(), { method: "POST", headers: H, body: text });
+    if (!res.ok) { say($("listMsg"), await errorText(res), "bad"); return; }
+    bulk = await res.json();
+    $("bulkList").innerHTML = "";
+    for (const it of bulk) {
+      const row = document.createElement("label"); row.className = "item";
+      row.innerHTML = '<input type="checkbox" checked><span class="n"></span><span class="t"></span>';
+      row.querySelector(".n").textContent = it.name; row.querySelector(".t").textContent = (it.type || "Asset") + " · " + it.id;
+      it.row = row; $("bulkList").append(row);
+    }
+    $("bulkCard").hidden = false; count();
+  } catch { say($("listMsg"), "Server nicht erreichbar. Läuft start.bat?", "bad"); }
+  finally { busy($("listBtn"), false); }
+};
+const chosen = () => bulk.filter(it => it.row.querySelector("input").checked);
+function count() { $("bulkCount").textContent = chosen().length + " von " + bulk.length + " ausgewählt"; }
+$("bulkList").onchange = count;
+$("toggleAll").onclick = () => {
+  const on = chosen().length < bulk.length; bulk.forEach(it => it.row.querySelector("input").checked = on);
+  $("toggleAll").textContent = on ? "Alle abwählen" : "Alle auswählen"; count();
+};
+$("zipBtn").onclick = async () => {
+  const ids = chosen().map(it => it.id); if (!ids.length) return;
+  busy($("zipBtn"), true, "Lade " + ids.length + " …");
+  try {
+    const res = await fetch("/api/bulk?x=1" + placeQ(), { method: "POST", body: ids.join("\n") });
+    if (!res.ok) { say($("bulkMsg"), await errorText(res), "bad"); return; }
+    saveBlob(await res.blob(), fileName(res));
+    say($("bulkMsg"), (res.headers.get("X-Result") || "") + " geladen. Details in report.csv.", "ok");
+  } catch { say($("bulkMsg"), "Server nicht erreichbar.", "bad"); }
+  finally { busy($("zipBtn"), false); }
+};
+$("saveBtn").onclick = async () => {
+  const ids = chosen().map(it => it.id); if (!ids.length) return;
+  busy($("saveBtn"), true, "Speichere …");
+  try {
+    const res = await fetch("/api/plugin-save?folder=" + encodeURIComponent($("folder").value.trim()) + placeQ(), { method: "POST", headers: H, body: ids.join("\n") });
+    if (!res.ok) { say($("bulkMsg"), await errorText(res), "bad"); return; }
+    const r = await res.json();
+    const failed = Object.fromEntries(r.errors.map(e => [e.id, e.error]));
+    for (const it of chosen()) {
+      it.row.classList.toggle("fail", !!failed[it.id]); it.row.classList.toggle("done", !failed[it.id]);
+      it.row.querySelector(".t").textContent = failed[it.id] || ((r.files[it.id] || []).length + " Datei(en)");
+    }
+    say($("bulkMsg"), r.saved + "/" + r.total + " gespeichert in " + r.folder, r.errors.length ? "bad" : "ok");
+  } catch { say($("bulkMsg"), "Server nicht erreichbar.", "bad"); }
+  finally { busy($("saveBtn"), false); }
 };
 
-$("bulk").onsubmit = e => {
+// Model
+$("modelForm").onsubmit = e => {
   e.preventDefault();
-  const text = $("list").value.trim();
-  if (!text) return;
-  run($("bulkBtn"), $("bulkMsg"), "Lade alle … (kann dauern)", async () =>
-    save(await fetch("/api/bulk?x=1" + place(), { method: "POST", body: text }), $("bulkMsg"),
-      (n, r) => (r.headers.get("X-Result") || "") + " geladen: " + n + " (Details in report.csv)"));
+  const q = $("mq").value.trim(); if (!q) return;
+  say($("modelMsg"), "Lade Model und alles darin … (kann dauern)");
+  downloadUrl($("modelBtn"), "/api/model?q=" + encodeURIComponent(q) + placeQ(), $("modelMsg"));
 };
+
+// Hochladen
+let mapping = [];
+$("upBtn").onclick = async () => {
+  const ids = [...new Set(($("upList").value.match(/\d{5,19}/g) || []))]; if (!ids.length) return;
+  if (!status.user) { say($("upMsg"), "Erst einloggen: cookie.txt ist abgelaufen oder fehlt.", "bad"); return; }
+  if (!status.apikey) { say($("upMsg"), "apikey.txt fehlt (Open Cloud, Assets Read + Write).", "bad"); return; }
+  mapping = []; $("upResults").innerHTML = ""; $("copyBtn").hidden = true;
+  busy($("upBtn"), true, "Lade hoch …");
+  let done = 0;
+  for (const id of ids) {
+    const row = document.createElement("div"); row.className = "item";
+    row.innerHTML = '<span></span><span class="n"></span><span class="t">läuft …</span>'; row.querySelector(".n").textContent = id;
+    $("upResults").append(row);
+    try {
+      const res = await fetch("/api/plugin-upload?q=" + id + "&user=" + status.user.id + placeQ(), { headers: H });
+      if (res.ok) { const r = await res.json(); mapping.push(id + " → " + r.id); row.classList.add("done"); row.querySelector(".t").textContent = "→ " + r.id; }
+      else { row.classList.add("fail"); row.querySelector(".t").textContent = await errorText(res); }
+    } catch { row.classList.add("fail"); row.querySelector(".t").textContent = "Server nicht erreichbar"; }
+    say($("upMsg"), ++done + " von " + ids.length);
+  }
+  say($("upMsg"), mapping.length + " von " + ids.length + " hochgeladen.", mapping.length === ids.length ? "ok" : "bad");
+  $("copyBtn").hidden = !mapping.length;
+  busy($("upBtn"), false);
+};
+$("copyBtn").onclick = () => navigator.clipboard.writeText(mapping.join("\n")).then(() => say($("upMsg"), "Kopiert.", "ok"));
 </script>
 </body></html>"""
 
@@ -586,6 +967,10 @@ if __name__ == "__main__":
         install_plugin()
     except OSError as e:
         print(f"Plugin konnte nicht installiert werden: {e}")
+    try:
+        import DracoPy  # noqa: F401
+    except ImportError:
+        print("Hinweis: Neue Meshes kommen erst als OBJ/GLB, wenn DracoPy installiert ist: python -m pip install DracoPy")
     # Windows erlaubt sonst einen zweiten Server auf demselben Port, der Anfragen abfängt.
     ThreadingHTTPServer.allow_reuse_address = False
     try:
@@ -597,7 +982,8 @@ if __name__ == "__main__":
             ours = False
         if not ours:
             raise SystemExit(f"Port {PORT} ist von einem anderen Programm belegt. Das Programm schließen und start.bat neu öffnen.")
-        webbrowser.open(f"http://127.0.0.1:{PORT}")
+        if "--no-browser" not in sys.argv:
+            webbrowser.open(f"http://127.0.0.1:{PORT}")
         raise SystemExit("Läuft schon in einem anderen Fenster. Browser wurde geöffnet.\n"
                          "Nach einem Update das alte Fenster schließen und start.bat neu öffnen, sonst läuft die alte Version.")
     url = f"http://127.0.0.1:{PORT}"

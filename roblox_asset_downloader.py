@@ -22,6 +22,7 @@ import gzip
 import json
 import os
 import re
+import struct
 import sys
 import time
 import urllib.error
@@ -69,6 +70,64 @@ def extract_ids(text, bare=False):
         for m in re.finditer(BARE, text):
             ids.setdefault(m.group(1), None)
     return list(ids)
+
+
+def _lz4_block(src, size):
+    """LZ4-Block entpacken (so komprimiert Roblox die Chunks in .rbxm)."""
+    dst, i, n = bytearray(), 0, len(src)
+    while i < n:
+        token = src[i]
+        i += 1
+        literal = token >> 4
+        if literal == 15:
+            while True:
+                b = src[i]
+                i += 1
+                literal += b
+                if b != 255:
+                    break
+        dst += src[i:i + literal]
+        i += literal
+        if i >= n or len(dst) >= size:
+            break
+        offset = src[i] | (src[i + 1] << 8)
+        i += 2
+        length = token & 15
+        if length == 15:
+            while True:
+                b = src[i]
+                i += 1
+                length += b
+                if b != 255:
+                    break
+        start = len(dst) - offset
+        for k in range(length + 4):  # Kopie darf sich mit dem Ziel überlappen, deshalb Byte für Byte
+            dst.append(dst[start + k])
+    return bytes(dst)
+
+
+def ids_in_model(data):
+    """Alle Asset-IDs in einem Model (.rbxm binär oder .rbxmx), in Reihenfolge, ohne Duplikate.
+    Binäre Chunks sind LZ4-komprimiert; Chunks mit Zstandard werden übersprungen (selten)."""
+    if not data.startswith(b"<roblox!"):
+        return extract_ids(data.decode("utf-8", "ignore"))  # .rbxmx ist Text
+    texts, pos = [], 32
+    while pos + 16 <= len(data):
+        name = data[pos:pos + 4]
+        compressed, size = struct.unpack_from("<II", data, pos + 4)
+        body = data[pos + 16:pos + 16 + (compressed or size)]
+        pos += 16 + (compressed or size)
+        if name == b"END\0":
+            break
+        if compressed:
+            if body[:4] == b"\x28\xb5\x2f\xfd":  # Zstandard
+                continue
+            try:
+                body = _lz4_block(body, size)
+            except IndexError:
+                continue
+        texts.append(body.decode("latin-1"))
+    return extract_ids("\n".join(texts))
 
 
 def guess_ext(data):
@@ -269,6 +328,9 @@ def main():
             else:
                 path = out_dir / f"{asset_id}.{guess_ext(data)}"
                 path.write_bytes(data)
+                from roblox_mesh import extra_files  # Meshes zusätzlich als OBJ und GLB
+                for extra, extra_data in extra_files(data, path.name):
+                    (out_dir / extra).write_bytes(extra_data)
                 row = [asset_id, "ok", f"{len(data):,} Bytes", path.name]
                 ok += 1
             w.writerow(row)

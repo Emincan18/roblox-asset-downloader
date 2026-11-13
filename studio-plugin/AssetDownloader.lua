@@ -473,11 +473,11 @@ folderBox.Visible, cartBtn.Visible, cartUploadBtn.Visible = false, false, false
 
 page("VFX", 4)
 -- VFX-Werkzeuge für Objekte, die schon im Spiel sind (z. B. eine Aura mit mehreren Emittern).
-card("VFX aus dem Spiel", "Erst die VFX oder den ganzen Ordner (z. B. Aura) im Explorer anklicken.")
+card("VFX und Models aus dem Spiel", "Erst die VFX, das Model oder den ganzen Ordner (z. B. Aura) im Explorer anklicken.")
 local repairBtn = button("Reparieren und sichern", PURPLE,
 	"Lädt jede Textur der Auswahl unter deinem Namen hoch und setzt die neuen IDs ein. Größe, Farben, Rotation und alle Einstellungen bleiben.\n\nDanach liegt alles in downloads/<Name>/: die VFX als .rbxm und jede Textur als Bild. Braucht apikey.txt.")
 local saveSelBtn = button("Nur sichern (nichts hochladen)", GREY,
-	"Speichert die Auswahl als .rbxm und alle Texturen als Bilder nach downloads/<Name>/. Lädt nichts hoch, die IDs bleiben die alten.")
+	"Speichert die Auswahl als .rbxm nach downloads/<Name>/ und daneben jedes Asset, das darin steckt: alle Meshes, Texturen, SurfaceAppearance-Bilder, Sounds und Animationen. Ein Model aus vielen Meshes also mit einem Klick. Lädt nichts hoch, die IDs bleiben die alten.")
 local playSelBtn = button("Auswahl abspielen", BLUE,
 	"Löst alle ParticleEmitter der Auswahl einmal aus (mit EmitCount und EmitDelay, falls gesetzt). Hit-VFX sieht man sonst nicht, weil sie nur per Script feuern.\n\nSpielt immer als Kopie 12 Studs vor deiner Kamera, egal ob die VFX im Workspace, in ReplicatedStorage oder in einem Script liegt. Das Original bleibt unverändert, du kannst beliebig oft abspielen.")
 local vfxLabel = label("")
@@ -2139,7 +2139,7 @@ local SAVE_BATCH = 5
 local function save(ids, folder, btn, idleText)
 	btn.Active = false
 	local url = ("%s/api/plugin-save?place=%s&folder=%s"):format(SERVER, HttpService:UrlEncode(placeBox.Text), HttpService:UrlEncode(folder))
-	local r = { saved = 0, total = #ids, folder = folder, errors = {} }
+	local r = { saved = 0, total = #ids, folder = folder, errors = {}, files = {} }
 	for first = 1, #ids, SAVE_BATCH do
 		btn.Text = progress("Speichere", first - 1, #ids)
 		local batch = table.move(ids, first, math.min(first + SAVE_BATCH - 1, #ids), 1, {})
@@ -2153,6 +2153,7 @@ local function save(ids, folder, btn, idleText)
 		r.saved += part.saved
 		r.folder = part.folder
 		table.move(part.errors, 1, #part.errors, #r.errors + 1, r.errors)
+		for id, names in part.files or {} do r.files[id] = names end
 	end
 	btn.Active, btn.Text = true, idleText
 	local lines = { ("%d/%d gespeichert in %s"):format(r.saved, r.total, r.folder) }
@@ -2230,6 +2231,36 @@ local function repairTextures(found, ids, btn)
 	return lines, #errors == 0, map
 end
 
+-- Eigenschaften, in denen Assets per ID stecken.
+local ID_PROPS = { Animation = { "AnimationId" }, Sound = { "SoundId" }, ParticleEmitter = { "Texture" },
+	Beam = { "Texture" }, Trail = { "Texture" }, Decal = { "Texture" }, Texture = { "Texture" },
+	MeshPart = { "MeshId", "TextureID" }, SpecialMesh = { "MeshId", "TextureId" }, ImageLabel = { "Image" },
+	ImageButton = { "Image" }, Shirt = { "ShirtTemplate" }, Pants = { "PantsTemplate" }, ShirtGraphic = { "Graphic" },
+	SurfaceAppearance = { "ColorMap", "NormalMap", "MetalnessMap", "RoughnessMap" } }
+
+-- Alle Asset-IDs in der Explorer-Auswahl und darunter, ohne Duplikate, in Explorer-Reihenfolge.
+local function idsIn(roots)
+	local ids, seen = {}, {}
+	local function visit(obj)
+		for _, prop in ID_PROPS[obj.ClassName] or {} do
+			local okRead, raw = pcall(function() return obj[prop] end) -- manche Eigenschaften dürfen Plugins nicht lesen
+			local value = okRead and tostring(raw) or ""
+			local id = value:match("rbxassetid://(%d+)") or value:match("[?&][iI][dD]=(%d+)")
+			if id and not seen[id] then
+				seen[id] = true
+				table.insert(ids, id)
+			end
+		end
+	end
+	for _, r in roots do
+		visit(r)
+		for _, d in r:GetDescendants() do visit(d) end
+	end
+	return ids
+end
+
+local function idsInSelection() return idsIn(Selection:Get()) end
+
 -- Objekte sichern: optional Texturen unter eigenem Namen hochladen und IDs tauschen,
 -- dann .rbxm + alle Texturen nach downloads/<name>/. Nach dem Hochladen tragen Datei und Bilder die neuen IDs.
 -- Schreibt Bytes als Datei nach downloads/<folder>/<file> (leer = <folder>.rbxm). Hex, weil Luau-Strings
@@ -2264,11 +2295,15 @@ local function backup(roots, name, repair, btn, idleText, outLabel)
 	local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, roots)
 	local stored = okSer and store(name, "", buffer.tostring(buf), btn)
 	table.insert(lines, stored and ("Gespeichert: downloads/%s/%s.rbxm"):format(name, name) or "Datei konnte nicht gespeichert werden. Läuft start.bat?")
-	if #ids > 0 then
+	-- Alles, was in der Auswahl per ID steckt, in denselben Ordner: Meshes, Bilder, Sounds, Animationen.
+	-- So muss man ein Model aus mehreren Meshes nicht Teil für Teil herunterladen.
+	local all = idsIn(roots)
+	if #all > 0 then
 		local fileIds = {}
-		for _, id in ids do table.insert(fileIds, map[id] or id) end
+		for _, id in all do table.insert(fileIds, map[id] or id) end
 		local r = save(fileIds, name, btn, "Speichere …")
-		table.insert(lines, r and ("%d/%d Texturen als Bild gespeichert."):format(r.saved, r.total) or "Texturen konnten nicht gespeichert werden.")
+		table.insert(lines, r and ("%d/%d Assets gespeichert (Meshes, Bilder, Sounds, Animationen)."):format(r.saved, r.total)
+			or "Assets konnten nicht gespeichert werden.")
 		allOk = allOk and r ~= nil and r.saved == r.total
 	end
 	btn.Active, btn.Text = true, idleText
@@ -2328,33 +2363,6 @@ loadBtn.Activated:Connect(function() if loadBtn.Active then load(idBox.Text) end
 idBox.FocusLost:Connect(function(enter) if enter then load(idBox.Text) end end)
 bulkBtn.Activated:Connect(loadBulk)
 
--- Eigenschaften, in denen Assets per ID stecken.
-local ID_PROPS = { Animation = { "AnimationId" }, Sound = { "SoundId" }, ParticleEmitter = { "Texture" },
-	Beam = { "Texture" }, Trail = { "Texture" }, Decal = { "Texture" }, Texture = { "Texture" },
-	MeshPart = { "MeshId", "TextureID" }, SpecialMesh = { "MeshId", "TextureId" }, ImageLabel = { "Image" },
-	ImageButton = { "Image" }, Shirt = { "ShirtTemplate" }, Pants = { "PantsTemplate" }, ShirtGraphic = { "Graphic" } }
-
--- Alle Asset-IDs in der Explorer-Auswahl und darunter, ohne Duplikate, in Explorer-Reihenfolge.
-local function idsIn(roots)
-	local ids, seen = {}, {}
-	local function visit(obj)
-		for _, prop in ID_PROPS[obj.ClassName] or {} do
-			local value = tostring(obj[prop])
-			local id = value:match("rbxassetid://(%d+)") or value:match("[?&][iI][dD]=(%d+)")
-			if id and not seen[id] then
-				seen[id] = true
-				table.insert(ids, id)
-			end
-		end
-	end
-	for _, r in roots do
-		visit(r)
-		for _, d in r:GetDescendants() do visit(d) end
-	end
-	return ids
-end
-
-local function idsInSelection() return idsIn(Selection:Get()) end
 
 -- ClientFX ---------------------------------------------------------------------------------
 
@@ -4757,5 +4765,126 @@ do -- eigener Block am Dateiende: braucht reupload() und TEXTURE_PROPS von weite
 		showScan()
 		upInfo.TextColor3 = (#errors == 0 and #fails == 0) and OK or BAD
 		upInfo.Text = table.concat(lines, "\n") .. "\n" .. upInfo.Text
+	end)
+end
+
+-- Tab: Mesh ---------------------------------------------------------------------------------
+-- Ein Knopf für ein ganzes Model: .rbxm, jedes Mesh als .obj/.glb, alle Texturen und eine model.json, in der steht,
+-- welches Teil welches Mesh und welche Texturen benutzt. Damit kann man es in Blender oder mit einer KI weiterbauen.
+do
+	page("Mesh", 4)
+	pages.Mesh.Parent.Visible = false -- showTab("Laden") lief schon, bevor es diesen Tab gab
+	for n, t in tabs do
+		if n ~= "Mesh" and t.LayoutOrder >= 4 then t.LayoutOrder += 1 end
+	end
+	card("Model herunterladen", "Model im Explorer anklicken, dann Alles herunterladen.")
+	local meshBtn = button("Alles herunterladen", ACCENT,
+		"Speichert nach downloads/<Model-Name>/:\n• das Model als .rbxm (in Studio: Rechtsklick > Insert from File)\n• jedes Mesh als .obj und .glb (Blender oder Studio > Import 3D; .glb mit Knochen, falls geriggt)\n• alle Texturen und SurfaceAppearance-Bilder\n• model.json: für jedes Teil Mesh-Datei, Texturen, Größe, Position, Drehung, Farbe und Material\n\nDie model.json ist für Blender-Skripte oder Codex/Claude gedacht: Damit lässt sich das Model genau so wieder zusammenbauen.\n\nGesperrte Assets stehen unten. Bei gesperrten Animationen hilft der Spiel-Link im Laden-Tab.")
+	local meshLabel = label("")
+
+	local function idOf(value)
+		local s = tostring(value)
+		return s:match("rbxassetid://(%d+)") or s:match("[?&][iI][dD]=(%d+)")
+	end
+	local function vec(v) return { math.round(v.X * 1000) / 1000, math.round(v.Y * 1000) / 1000, math.round(v.Z * 1000) / 1000 } end
+
+	-- Ein Eintrag pro Objekt mit Asset oder Form. Pfade relativ zum gewählten Objekt, z. B. "Main/root/body".
+	local function describe(roots, files, failed)
+		local function asset(value)
+			local id = idOf(value)
+			if not id then return nil end
+			return { id = id, files = files[id], error = failed[id] }
+		end
+		local list = {}
+		for _, top in roots do
+			local all = top:GetDescendants()
+			table.insert(all, 1, top)
+			for _, o in all do
+				local path, p = o.Name, o.Parent
+				while p and p ~= top.Parent do
+					path, p = p.Name .. "/" .. path, p.Parent
+				end
+				local e = { path = path, class = o.ClassName }
+				if o:IsA("BasePart") then
+					local rx, ry, rz = o.CFrame:ToOrientation()
+					e.size, e.position = vec(o.Size), vec(o.Position)
+					e.rotation = { math.round(math.deg(rx) * 100) / 100, math.round(math.deg(ry) * 100) / 100, math.round(math.deg(rz) * 100) / 100 }
+					e.color, e.material, e.transparency = o.Color:ToHex(), o.Material.Name, o.Transparency
+					if o:IsA("MeshPart") then
+						e.mesh, e.texture = asset(o.MeshId), asset(o.TextureID)
+						-- Originalgröße des Meshes: Skalierung in Studio = size / meshSize
+						local okSize, meshSize = pcall(function() return o.MeshSize end)
+						if okSize then e.meshSize = vec(meshSize) end
+					end
+				elseif o:IsA("SpecialMesh") then
+					e.mesh, e.texture, e.scale = asset(o.MeshId), asset(o.TextureId), vec(o.Scale)
+				elseif o:IsA("SurfaceAppearance") then
+					for _, prop in { "ColorMap", "NormalMap", "MetalnessMap", "RoughnessMap" } do
+						local ok, v = pcall(function() return o[prop] end)
+						e[prop:sub(1, 1):lower() .. prop:sub(2)] = ok and asset(v) or nil
+					end
+				elseif o:IsA("Decal") then -- Texture ist auch ein Decal
+					e.texture, e.face, e.transparency = asset(o.Texture), o.Face.Name, o.Transparency
+					if o:IsA("Texture") then e.studsPerTile = { o.StudsPerTileU, o.StudsPerTileV } end
+				elseif o:IsA("Animation") then
+					e.animation = asset(o.AnimationId)
+				elseif o:IsA("Sound") then
+					e.sound = asset(o.SoundId)
+				elseif o:IsA("Bone") then
+					e.position = vec(o.Position)
+				else
+					e = nil
+				end
+				if e then table.insert(list, e) end
+			end
+		end
+		return list
+	end
+
+	meshBtn.Activated:Connect(function()
+		if not meshBtn.Active then return end
+		local sel = Selection:Get()
+		if #sel == 0 then
+			meshLabel.TextColor3, meshLabel.Text = BAD, "Erst das Model im Explorer anklicken."
+			return
+		end
+		local name = #sel == 1 and sel[1].Name or ("%s +%d"):format(sel[1].Name, #sel - 1)
+		meshBtn.Active, meshBtn.Text = false, "Speichere Model …"
+		local lines = {}
+		local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, sel)
+		local stored = okSer and store(name, "", buffer.tostring(buf), meshBtn)
+		table.insert(lines, stored and ("Model: downloads/%s/%s.rbxm"):format(name, name) or "Model konnte nicht gespeichert werden. Läuft start.bat?")
+		local ids = idsIn(sel)
+		local r = #ids > 0 and save(ids, name, meshBtn, "Speichere …") or { saved = 0, total = 0, errors = {}, files = {} }
+		meshBtn.Active = false
+		local failed = {}
+		for _, e in (r and r.errors or {}) do failed[e.id] = e.error end
+		local meshes = 0
+		for _, names in (r and r.files or {}) do
+			for _, f in names do
+				if f:match("%.glb$") then meshes += 1 end
+			end
+		end
+		if r then
+			table.insert(lines, ("%d/%d Assets geladen, davon %d Meshes als .obj + .glb."):format(r.saved, r.total, meshes))
+		else
+			table.insert(lines, "Assets konnten nicht geladen werden. Läuft start.bat?")
+		end
+		meshBtn.Text = "Schreibe model.json …"
+		local manifest = { model = name, note = "Pfade relativ zum Model. Größe/Position in Studs, Drehung in Grad (X, Y, Z wie CFrame:ToOrientation). meshSize: Originalgröße des Meshes, Skalierung = size / meshSize. files: Dateien im selben Ordner (.obj/.glb für Blender oder Studio > Import 3D).",
+			parts = describe(sel, r and r.files or {}, failed) }
+		local okJson, json = pcall(HttpService.JSONEncode, HttpService, manifest)
+		local wroteJson = okJson and store(name, "model.json", json)
+		table.insert(lines, wroteJson and "model.json geschrieben." or "model.json konnte nicht geschrieben werden.")
+		for i, e in (r and r.errors or {}) do
+			if i > 6 then
+				table.insert(lines, ("… und %d weitere."):format(#r.errors - 6))
+				break
+			end
+			table.insert(lines, ("%s: %s"):format(e.id, e.error))
+		end
+		meshBtn.Active, meshBtn.Text = true, "Alles herunterladen"
+		meshLabel.TextColor3 = (stored and r and #r.errors == 0 and wroteJson) and OK or BAD
+		meshLabel.Text = table.concat(lines, "\n")
 	end)
 end

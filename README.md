@@ -32,8 +32,14 @@ Roblox gibt neue Assets nur an eingeloggte Accounts heraus. Das Tool nutzt dafü
 
 `start.bat` doppelklicken. Der Browser öffnet `http://127.0.0.1:47651`.
 
-- **Einzeln:** ID oder Link eingeben, auf **Download** klicken.
-- **Bulk:** Viele IDs oder Links untereinander einfügen und auf **Alle als ZIP laden** klicken. Die ZIP enthält eine `report.csv`, die zeigt, was geklappt hat.
+Einmalig für Meshes als OBJ/GLB (neue Meshes sind Draco-komprimiert): `python -m pip install DracoPy`.
+
+Die Seite sieht aus wie das Plugin und hat vier Tabs. Oben zeigt sie, ob der Login gültig ist, ob Meshes als OBJ/GLB gehen (DracoPy) und ob Hochladen geht (apikey.txt).
+
+- **Laden:** ID oder Link eingeben. Vorschau: Meshes drehen sich in 3D, Sounds spielen, Bilder erscheinen, sonst das Roblox-Vorschaubild. Meshes gibt es zusätzlich als **OBJ** und **GLB**, Models auch komplett als ZIP.
+- **Bulk:** Viele IDs oder Links untereinander einfügen, **Liste laden** zeigt Namen und Typen. Auswählen, dann **Als ZIP** oder **In Ordner speichern** (nach `downloads/<Ordner>/`). Die ZIP enthält eine `report.csv`.
+- **Model:** Model-ID eingeben, **Alles als ZIP** lädt das Model und alles darin: Meshes als `.obj`/`.glb`, Texturen, Sounds, Animationen.
+- **Hochladen:** IDs unter dem eigenen Account neu hochladen (Bilder, Sounds, Meshes, Animationen); die neuen IDs lassen sich kopieren. Braucht `apikey.txt`.
 
 Oben auf der Seite steht, ob der Login aktiv ist.
 
@@ -106,6 +112,8 @@ Lädt alles nach `downloads/`. Mit `-o ORDNER` kannst du einen anderen Zielordne
 
 - Erkannt werden IDs, `rbxassetid://`-Links, Catalog-, Library-, Bundle- und Creator-Store-Links.
 - Dateien heißen `Name (ID).endung`. Die Endung wird am Inhalt erkannt (`.rbxm`, `.rbxmx`, `.ogg`, `.mp3`, `.png`, `.mesh` …).
+- **Tab Mesh:** Model im Explorer anklicken, **Alles herunterladen**. In `downloads/<Model>/` liegen dann die `.rbxm`, jedes Mesh als `.obj`/`.glb`, alle Texturen und eine `model.json` (pro Teil Mesh-Datei, Texturen, Größe, Originalgröße des Meshes, Position, Drehung, Farbe, Material). Mit der `model.json` können Blender-Skripte oder Codex/Claude das Model wieder zusammenbauen.
+- Meshes kommen zusätzlich als `.obj` und `.glb`. Beide öffnen Blender und Roblox Studio (Import 3D). OBJ hat Form, UVs und Normalen; GLB hat dazu Knochen und Gewichte, falls das Mesh geriggt ist. Neue Meshes (Version 7.00) brauchen dafür das Python-Paket `DracoPy`; ohne es bleibt nur die `.mesh`.
 - Viele Animationen und Sounds gibt Roblox nur im Kontext des Spiels heraus, das sie benutzen darf. Das Tool probiert automatisch die Spiele des Erstellers, bei Gruppen auch private Test-Places, bei Usern auch die Spiele ihrer eigenen Gruppen. Klappt es über ein Spiel, merkt es sich das in `places.txt` und nutzt es für alle weiteren Assets. Beim Bulk-Download bekommen Fehlschläge deshalb eine zweite Runde.
 - Wenn trotzdem „Kein Zugriff“ kommt: Im Feld **Spiel** den Link des Spiels einfügen, aus dem die IDs stammen (Kommandozeile: `--place LINK`).
 - „Privates Audio“ heißt, der Ersteller hat das Audio privat gestellt. Roblox gibt es nur ihm oder Spielen, die er freigegeben hat, auch im Spielkontext nicht. Das lässt sich nicht herunterladen.
