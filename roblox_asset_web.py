@@ -448,16 +448,20 @@ class Handler(BaseHTTPRequestHandler):
         results = fetch_many(ids, load_cookie(), place)
         with ThreadPoolExecutor(max_workers=6) as pool:
             names = [n for n, _ in pool.map(asset_info, ids)]
-        errors = []
+        errors, files = [], {}
         for (asset_id, data, err), name in zip(results, names):
             if err:
                 errors.append({"id": asset_id, "error": err})
             else:
                 target = file_name(asset_id, data, name)
                 (out / target).write_bytes(data)
+                files[asset_id] = [target]
                 for extra, extra_data in extra_files(data, target):  # Meshes zusätzlich als OBJ und GLB
                     (out / extra).write_bytes(extra_data)
-        self.send(200, json.dumps({"saved": len(ids) - len(errors), "total": len(ids), "folder": str(out), "errors": errors}).encode())
+                    files[asset_id].append(extra)
+        # files: welche Datei(en) zu welcher ID gehören, damit das Plugin eine model.json mit echten Dateinamen schreibt
+        self.send(200, json.dumps({"saved": len(ids) - len(errors), "total": len(ids), "folder": str(out), "errors": errors,
+                                   "files": files}).encode())
 
     def log_message(self, *args):
         pass  # Konsole ruhig halten
