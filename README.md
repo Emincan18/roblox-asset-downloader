@@ -34,8 +34,12 @@ Roblox gibt neue Assets nur an eingeloggte Accounts heraus. Das Tool nutzt dafü
 
 Einmalig für Meshes als OBJ/GLB (neue Meshes sind Draco-komprimiert): `python -m pip install DracoPy`.
 
-- **Einzeln:** ID oder Link eingeben, auf **Download** klicken.
-- **Bulk:** Viele IDs oder Links untereinander einfügen und auf **Alle als ZIP laden** klicken. Die ZIP enthält eine `report.csv`, die zeigt, was geklappt hat.
+Die Seite sieht aus wie das Plugin und hat vier Tabs. Oben zeigt sie, ob der Login gültig ist, ob Meshes als OBJ/GLB gehen (DracoPy) und ob Hochladen geht (apikey.txt).
+
+- **Laden:** ID oder Link eingeben. Vorschau: Meshes drehen sich in 3D, Sounds spielen, Bilder erscheinen, sonst das Roblox-Vorschaubild. Meshes gibt es zusätzlich als **OBJ** und **GLB**, Models auch komplett als ZIP.
+- **Bulk:** Viele IDs oder Links untereinander einfügen, **Liste laden** zeigt Namen und Typen. Auswählen, dann **Als ZIP** oder **In Ordner speichern** (nach `downloads/<Ordner>/`). Die ZIP enthält eine `report.csv`.
+- **Model:** Model-ID eingeben, **Alles als ZIP** lädt das Model und alles darin: Meshes als `.obj`/`.glb`, Texturen, Sounds, Animationen.
+- **Hochladen:** IDs unter dem eigenen Account neu hochladen (Bilder, Sounds, Meshes, Animationen); die neuen IDs lassen sich kopieren. Braucht `apikey.txt`.
 
 Oben auf der Seite steht, ob der Login aktiv ist.
 
