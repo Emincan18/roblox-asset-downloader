@@ -409,20 +409,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, obj.encode() if wanted == "obj" else glb, "application/octet-stream", f"{stem}.{wanted}")
             self.send(200, data, "application/octet-stream", name, {"X-Ext": guess_ext(data)})
         elif url.path == "/api/model":
-            # Webseite: Model-ID -> ZIP mit dem Model und allem darin (Meshes als OBJ/GLB, Texturen, Sounds, Animationen).
+            # Webseite: eine oder mehrere IDs (Models, Meshes, Texturen gemischt) -> eine ZIP. Models werden aufgeklappt:
+            # alles, was darin steckt, kommt mit. Meshes zusätzlich als OBJ/GLB.
             ids = extract_ids(q.get("q", [""])[0], bare=True)
             if not ids:
                 return self.error(400, "Keine gültige Asset-ID gefunden.")
             place = parse_place(q.get("place", [""])[0])
-            data, err = fetch(ids[0], load_cookie(), place)
-            if err:
-                return self.error(502, err)
-            if guess_ext(data) not in ("rbxm", "rbxmx"):
-                return self.error(422, "Das ist kein Model. Für einzelne Assets den Tab Laden benutzen.")
-            inner = [i for i in ids_in_model(data) if i != ids[0]]
-            name = file_name(ids[0], data, asset_info(ids[0])[0])
-            body, ok = zip_results(fetch_many(inner, load_cookie(), place), [(name, data)])
-            self.send(200, body, "application/zip", f"{name.rsplit('.', 1)[0]}.zip", {"X-Result": f"{ok}/{len(inner)}"})
+            results = fetch_many(ids, load_cookie(), place)
+            inner, seen = [], set(ids)
+            for _, data, err in results:
+                if not err and guess_ext(data) in ("rbxm", "rbxmx"):
+                    for i in ids_in_model(data):
+                        if i not in seen:
+                            seen.add(i)
+                            inner.append(i)
+            if inner:
+                results += fetch_many(inner, load_cookie(), place)
+            if len(ids) == 1 and not results[0][2]:
+                zip_name = file_name(ids[0], results[0][1], asset_info(ids[0])[0]).rsplit(".", 1)[0] + ".zip"
+            else:
+                zip_name = f"roblox-assets-{len(results)}.zip"
+            body, ok = zip_results(results)
+            self.send(200, body, "application/zip", zip_name, {"X-Result": f"{ok}/{len(results)}"})
         elif url.path == "/api/plugin-upload":
             # Plugin: Bild, Animation, Sound oder Mesh unter eigenem Namen neu hochladen (Studio selbst darf das nicht).
             ids = extract_ids(q.get("q", [""])[0], bare=True)
@@ -694,9 +702,9 @@ ul.facts { margin:0; padding-left:18px; color:var(--muted); font-size:.88rem; di
   <section class="page" data-tab="Model">
     <form class="card" id="modelForm">
       <h2>Ganzes Model herunterladen</h2>
-      <p class="sub">Model-ID oder Link. Du bekommst eine ZIP mit allem, was im Model steckt.</p>
+      <p class="sub">Model-ID, oder die IDs aus dem Plugin (Mesh, Texturen …) einfach alle hier rein. Du bekommst eine ZIP mit allem; Models werden aufgeklappt.</p>
       <div class="row">
-        <input id="mq" placeholder="Model-ID, z. B. 123456789" autocomplete="off">
+        <input id="mq" placeholder="Model-ID oder mehrere IDs" autocomplete="off">
         <button class="btn main" id="modelBtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>Alles als ZIP</button>
       </div>
       <ul class="facts">
@@ -974,7 +982,8 @@ if __name__ == "__main__":
             ours = False
         if not ours:
             raise SystemExit(f"Port {PORT} ist von einem anderen Programm belegt. Das Programm schließen und start.bat neu öffnen.")
-        webbrowser.open(f"http://127.0.0.1:{PORT}")
+        if "--no-browser" not in sys.argv:
+            webbrowser.open(f"http://127.0.0.1:{PORT}")
         raise SystemExit("Läuft schon in einem anderen Fenster. Browser wurde geöffnet.\n"
                          "Nach einem Update das alte Fenster schließen und start.bat neu öffnen, sonst läuft die alte Version.")
     url = f"http://127.0.0.1:{PORT}"
