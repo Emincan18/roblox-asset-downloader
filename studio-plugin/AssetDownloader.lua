@@ -473,11 +473,11 @@ folderBox.Visible, cartBtn.Visible, cartUploadBtn.Visible = false, false, false
 
 page("VFX", 4)
 -- VFX-Werkzeuge für Objekte, die schon im Spiel sind (z. B. eine Aura mit mehreren Emittern).
-card("VFX aus dem Spiel", "Erst die VFX oder den ganzen Ordner (z. B. Aura) im Explorer anklicken.")
+card("VFX und Models aus dem Spiel", "Erst die VFX, das Model oder den ganzen Ordner (z. B. Aura) im Explorer anklicken.")
 local repairBtn = button("Reparieren und sichern", PURPLE,
 	"Lädt jede Textur der Auswahl unter deinem Namen hoch und setzt die neuen IDs ein. Größe, Farben, Rotation und alle Einstellungen bleiben.\n\nDanach liegt alles in downloads/<Name>/: die VFX als .rbxm und jede Textur als Bild. Braucht apikey.txt.")
 local saveSelBtn = button("Nur sichern (nichts hochladen)", GREY,
-	"Speichert die Auswahl als .rbxm und alle Texturen als Bilder nach downloads/<Name>/. Lädt nichts hoch, die IDs bleiben die alten.")
+	"Speichert die Auswahl als .rbxm nach downloads/<Name>/ und daneben jedes Asset, das darin steckt: alle Meshes, Texturen, SurfaceAppearance-Bilder, Sounds und Animationen. Ein Model aus vielen Meshes also mit einem Klick. Lädt nichts hoch, die IDs bleiben die alten.")
 local playSelBtn = button("Auswahl abspielen", BLUE,
 	"Löst alle ParticleEmitter der Auswahl einmal aus (mit EmitCount und EmitDelay, falls gesetzt). Hit-VFX sieht man sonst nicht, weil sie nur per Script feuern.\n\nSpielt immer als Kopie 12 Studs vor deiner Kamera, egal ob die VFX im Workspace, in ReplicatedStorage oder in einem Script liegt. Das Original bleibt unverändert, du kannst beliebig oft abspielen.")
 local vfxLabel = label("")
@@ -2230,6 +2230,36 @@ local function repairTextures(found, ids, btn)
 	return lines, #errors == 0, map
 end
 
+-- Eigenschaften, in denen Assets per ID stecken.
+local ID_PROPS = { Animation = { "AnimationId" }, Sound = { "SoundId" }, ParticleEmitter = { "Texture" },
+	Beam = { "Texture" }, Trail = { "Texture" }, Decal = { "Texture" }, Texture = { "Texture" },
+	MeshPart = { "MeshId", "TextureID" }, SpecialMesh = { "MeshId", "TextureId" }, ImageLabel = { "Image" },
+	ImageButton = { "Image" }, Shirt = { "ShirtTemplate" }, Pants = { "PantsTemplate" }, ShirtGraphic = { "Graphic" },
+	SurfaceAppearance = { "ColorMap", "NormalMap", "MetalnessMap", "RoughnessMap" } }
+
+-- Alle Asset-IDs in der Explorer-Auswahl und darunter, ohne Duplikate, in Explorer-Reihenfolge.
+local function idsIn(roots)
+	local ids, seen = {}, {}
+	local function visit(obj)
+		for _, prop in ID_PROPS[obj.ClassName] or {} do
+			local okRead, raw = pcall(function() return obj[prop] end) -- manche Eigenschaften dürfen Plugins nicht lesen
+			local value = okRead and tostring(raw) or ""
+			local id = value:match("rbxassetid://(%d+)") or value:match("[?&][iI][dD]=(%d+)")
+			if id and not seen[id] then
+				seen[id] = true
+				table.insert(ids, id)
+			end
+		end
+	end
+	for _, r in roots do
+		visit(r)
+		for _, d in r:GetDescendants() do visit(d) end
+	end
+	return ids
+end
+
+local function idsInSelection() return idsIn(Selection:Get()) end
+
 -- Objekte sichern: optional Texturen unter eigenem Namen hochladen und IDs tauschen,
 -- dann .rbxm + alle Texturen nach downloads/<name>/. Nach dem Hochladen tragen Datei und Bilder die neuen IDs.
 -- Schreibt Bytes als Datei nach downloads/<folder>/<file> (leer = <folder>.rbxm). Hex, weil Luau-Strings
@@ -2264,11 +2294,15 @@ local function backup(roots, name, repair, btn, idleText, outLabel)
 	local okSer, buf = pcall(SerializationService.SerializeInstancesAsync, SerializationService, roots)
 	local stored = okSer and store(name, "", buffer.tostring(buf), btn)
 	table.insert(lines, stored and ("Gespeichert: downloads/%s/%s.rbxm"):format(name, name) or "Datei konnte nicht gespeichert werden. Läuft start.bat?")
-	if #ids > 0 then
+	-- Alles, was in der Auswahl per ID steckt, in denselben Ordner: Meshes, Bilder, Sounds, Animationen.
+	-- So muss man ein Model aus mehreren Meshes nicht Teil für Teil herunterladen.
+	local all = idsIn(roots)
+	if #all > 0 then
 		local fileIds = {}
-		for _, id in ids do table.insert(fileIds, map[id] or id) end
+		for _, id in all do table.insert(fileIds, map[id] or id) end
 		local r = save(fileIds, name, btn, "Speichere …")
-		table.insert(lines, r and ("%d/%d Texturen als Bild gespeichert."):format(r.saved, r.total) or "Texturen konnten nicht gespeichert werden.")
+		table.insert(lines, r and ("%d/%d Assets gespeichert (Meshes, Bilder, Sounds, Animationen)."):format(r.saved, r.total)
+			or "Assets konnten nicht gespeichert werden.")
 		allOk = allOk and r ~= nil and r.saved == r.total
 	end
 	btn.Active, btn.Text = true, idleText
@@ -2328,33 +2362,6 @@ loadBtn.Activated:Connect(function() if loadBtn.Active then load(idBox.Text) end
 idBox.FocusLost:Connect(function(enter) if enter then load(idBox.Text) end end)
 bulkBtn.Activated:Connect(loadBulk)
 
--- Eigenschaften, in denen Assets per ID stecken.
-local ID_PROPS = { Animation = { "AnimationId" }, Sound = { "SoundId" }, ParticleEmitter = { "Texture" },
-	Beam = { "Texture" }, Trail = { "Texture" }, Decal = { "Texture" }, Texture = { "Texture" },
-	MeshPart = { "MeshId", "TextureID" }, SpecialMesh = { "MeshId", "TextureId" }, ImageLabel = { "Image" },
-	ImageButton = { "Image" }, Shirt = { "ShirtTemplate" }, Pants = { "PantsTemplate" }, ShirtGraphic = { "Graphic" } }
-
--- Alle Asset-IDs in der Explorer-Auswahl und darunter, ohne Duplikate, in Explorer-Reihenfolge.
-local function idsIn(roots)
-	local ids, seen = {}, {}
-	local function visit(obj)
-		for _, prop in ID_PROPS[obj.ClassName] or {} do
-			local value = tostring(obj[prop])
-			local id = value:match("rbxassetid://(%d+)") or value:match("[?&][iI][dD]=(%d+)")
-			if id and not seen[id] then
-				seen[id] = true
-				table.insert(ids, id)
-			end
-		end
-	end
-	for _, r in roots do
-		visit(r)
-		for _, d in r:GetDescendants() do visit(d) end
-	end
-	return ids
-end
-
-local function idsInSelection() return idsIn(Selection:Get()) end
 
 -- ClientFX ---------------------------------------------------------------------------------
 
