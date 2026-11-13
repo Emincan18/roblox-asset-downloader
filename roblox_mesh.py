@@ -193,6 +193,12 @@ def _draco(m, body):
     points = mesh.points.reshape(-1, 3).tolist()
     m.positions = [tuple(p) for p in points]
     normals = getattr(mesh, "normals", None)
+    if normals is None or not len(normals):
+        # Roblox legt Normalen als "generisches" Attribut ab (float, 3 Werte), nicht als Draco-NORMAL.
+        for attribute in mesh.attributes or []:
+            if attribute.get("attribute_type") == 4 and attribute.get("num_components") == 3 and attribute.get("data_type") == 9:
+                normals = attribute["data"]
+                break
     m.normals = [tuple(n) for n in normals.reshape(-1, 3).tolist()] if normals is not None and len(normals) else []
     uv = getattr(mesh, "tex_coord", None)
     m.uvs = [tuple(t) for t in uv.reshape(-1, 2).tolist()] if uv is not None and len(uv) else []

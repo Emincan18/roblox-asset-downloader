@@ -592,6 +592,10 @@ if __name__ == "__main__":
         install_plugin()
     except OSError as e:
         print(f"Plugin konnte nicht installiert werden: {e}")
+    try:
+        import DracoPy  # noqa: F401
+    except ImportError:
+        print("Hinweis: Neue Meshes kommen erst als OBJ/GLB, wenn DracoPy installiert ist: python -m pip install DracoPy")
     # Windows erlaubt sonst einen zweiten Server auf demselben Port, der Anfragen abfängt.
     ThreadingHTTPServer.allow_reuse_address = False
     try:
