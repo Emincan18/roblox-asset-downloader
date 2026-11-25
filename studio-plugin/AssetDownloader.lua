@@ -548,8 +548,8 @@ csPlay.label = label("")
 
 do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze von 200
 	page("Credits", 7)
-	card("Credits entfernen", "Entfernt in der ganzen Place Dekompilier-Hinweise, Discord-Links, Credits und Lizenzen.")
-	local creditsBtn = button("Credits löschen", BAD, "Script-Code: löscht jeden Kommentar, in dem Credits, Lizenzen, Discord, Decompiler-Hinweise (Saved by, Script path, Decompile time, -- Line:, -- upvalues:) oder Copyright stehen. Discord-Links in Strings fliegen auch raus. Der restliche Code bleibt, wie er ist.\n\nObjekte (VFX, Models, GUIs): Discord-Links und „Made by …“ aus Namen, Texten und Attributen. StringValues und Scripts, die nur Credits enthalten (Credits, License), werden gelöscht. README-Scripts immer, auch das von SaveInstance direkt unter game.\n\nZum Bestätigen zweimal klicken. Strg+Z macht alles rückgängig.")
+	card("Decompiler-Spuren entfernen", "Eine Taste für alles: Credits, Variablennamen und Decompiler-Schreibweise in der ganzen Place.")
+	local creditsBtn = button("Decompiler-Spuren entfernen", BAD, "1. Credits: löscht jeden Kommentar mit Credits, Lizenzen, Discord, Decompiler-Hinweisen (Saved by, Script path, Decompile time, -- Line:, -- upvalues:) oder Copyright. Discord-Links in Strings fliegen raus. Objekte (VFX, Models, GUIs): Discord-Links und „Made by …“ aus Namen, Texten und Attributen. Credits-, License- und README-Scripts werden gelöscht.\n\n2. Variablen: v1, u28, p51, Vector2_new_ret bekommen Namen aus dem Code (local v5 = script.Cam:Clone() wird camClone, PlayerAdded wird player). Die Tabelle eines Moduls heißt wie das Script.\n\n3. Schreibweise: ; am Zeilenende und end; weg, (1 / 0) wird math.huge, Typen : table, : any und self: … weg, local x = nil wird local x.\n\nStrings bleiben unangetastet. Kompiliert ein Script danach nicht mehr, bleibt es, wie es war. Zum Bestätigen zweimal klicken. Strg+Z macht alles rückgängig.")
 	local creditsLabel = label("")
 
 	card("Kamera reparieren", "Wenn die Kamera nach dem Laden einer kopierten Place festhängt.")
@@ -858,44 +858,12 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 		return r
 	end
 
-	local creditsConfirmUntil = 0
-	creditsBtn.Activated:Connect(function()
-		if RunService:IsRunning() then
-			creditsLabel.TextColor3, creditsLabel.Text = BAD, "Erst den Play-Test beenden."
-			return
-		end
-		if os.clock() > creditsConfirmUntil then
-			creditsConfirmUntil = os.clock() + 5
-			creditsBtn.Text = "Sicher? Nochmal klicken"
-			task.delay(5, function() creditsBtn.Text = "Credits löschen" end)
-			return
-		end
-		creditsConfirmUntil = 0
-		creditsBtn.Active, creditsBtn.Text = false, "Lösche …"
-		local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: Credits löschen")
-		local ok, r = pcall(cleanPlace)
-		if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
-		creditsBtn.Active, creditsBtn.Text = true, "Credits löschen"
-		if ok then
-			creditsLabel.TextColor3 = OK
-			creditsLabel.Text = ("%d Scripts bereinigt (%d Kommentare, %d Links, %d Credit-Sätze), %d Objekte geändert, %d gelöscht.%s Strg+Z macht es rückgängig.")
-				:format(r.scripts, r.comments, r.links, r.credits, r.objects, r.deleted,
-					r.skipped > 0 and (" %d Scripts nicht angefasst, sie wären sonst kaputt gegangen."):format(r.skipped) or "")
-		else
-			creditsLabel.TextColor3, creditsLabel.Text = BAD, "Fehler: " .. tostring(r)
-		end
-	end)
-
 	-- Variablennamen aufräumen ----------------------------------------------------------------
 	-- Decompiler kennen die echten Namen nicht und nummerieren: v12, u28, p51, os_clock_ret. Der Knopf leitet
 	-- aus dem Code einen lesbaren Namen ab (local v5 = script.Cam:Clone() -> camClone) und ersetzt nur echte
 	-- Code-Stellen: keine Strings, keine Kommentare, keine Felder wie obj.v1. Ein neuer Name kommt nie vor, wenn es
 	-- ihn im Script schon gibt.
 	do
-		card("Variablennamen aufräumen", "Macht dekompilierten Code lesbar: v12, u28, p51 bekommen Namen aus dem Code.")
-		local renameBtn = button("Variablennamen aufräumen", PURPLE, "Dekompilierter Code nummeriert Variablen durch (v1, u28, p51, Vector2_new_ret). Dieser Knopf gibt ihnen Namen, die aus dem Code folgen:\n\nlocal v5 = script.Cam:Clone() wird camClone\nlocal u3 = game:GetService(\"Players\") wird Players\nlocal v9 = Instance.new(\"Part\") wird part\nRenderStepped:Connect(function(p51) wird dt, PlayerAdded wird player, InputBegan wird input, gameProcessed\n\nWo sich kein Name ableiten lässt, bleibt der alte. Strings, Kommentare und Felder (obj.v1) bleiben unangetastet, und ein neuer Name wird nie gewählt, wenn er im Script schon vorkommt. Kompiliert ein Script danach nicht mehr, bleibt es, wie es war.\n\nSind im Explorer Scripts oder Ordner ausgewählt, nur diese, sonst die ganze Place. Zum Bestätigen zweimal klicken. Strg+Z macht alles rückgängig.")
-		local renameLabel = label("")
-
 		local KEYWORDS = {}
 		for _, k in { "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local", "nil",
 			"not", "or", "repeat", "return", "then", "true", "until", "while", "continue", "export", "type", "self" } do
@@ -1098,6 +1066,16 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 				while k > 0 and toks[k][1] == "o" and toks[k][2]:match("^%s+$") do k -= 1 end
 				return k
 			end
+			-- Namen, die als Feld vorkommen (obj.p0, obj:p0): { p0 = … } ist dann ein echter Schlüssel, keine Variable.
+			local fieldNames = {}
+			for k, t in toks do
+				if t[1] == "n" then
+					local p = prevSignificant(k)
+					if p > 0 and (toks[p][2] == ":" or (toks[p][2] == "." and not (p > 1 and toks[p - 1][2] == "."))) then
+						fieldNames[t[2]] = true
+					end
+				end
+			end
 			local ctx = {} -- "{" Tabelle, "(" Klammer, "b" Block: Schlüssel { Name = … } nur direkt in einer Tabelle
 			for k, t in toks do
 				local w = t[2]
@@ -1112,7 +1090,7 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					local p = prevSignificant(k)
 					local isField = p > 0 and (toks[p][2] == ":" or (toks[p][2] == "." and not (p > 1 and toks[p - 1][2] == ".")))
 					local prevP = p > 0 and not isField and toks[p][2]
-					if not isDecompName(w) and ctx[#ctx] == "{" and (prevP == "{" or prevP == "," or prevP == ";") then
+					if (not isDecompName(w) or fieldNames[w]) and ctx[#ctx] == "{" and (prevP == "{" or prevP == "," or prevP == ";") then
 						-- Schlüssel im Tabellen-Konstruktor { Speed = … } ist auch kein Variablenname.
 						local n1 = k + 1
 						while n1 <= #toks and toks[n1][1] == "o" and toks[n1][2]:match("^%s+$") do n1 += 1 end
@@ -1137,8 +1115,10 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			local wanted = {}
 			for name in targets do
 				local rhs = src:match("local%s+" .. name .. "%s*=%s*([^\n]+)")
-				if rhs and rhs:match("^{%s*};?%s*$") and scriptName and src:find(name .. ".__index = " .. name, 1, true) then
-					wanted[name] = ident(scriptName) -- local u2 = {}; u2.__index = u2 ist die Klasse des Moduls
+				-- local u2 = {}; u2.__index = u2 ist die Klasse des Moduls, local u2 = {…} … return u2 seine Tabelle
+				if rhs and scriptName and ((rhs:match("^{%s*};?%s*$") and src:find(name .. ".__index = " .. name, 1, true))
+					or (rhs:match("^{") and src:match("\nreturn%s+" .. name .. "%s*;?%s*$"))) then
+					wanted[name] = ident(scriptName)
 				else
 					wanted[name] = rhs and nameFromRhs(rhs)
 					-- Der Decompiler schreibt den echten Funktionsnamen in den Kommentar: function(…) -- Line: 1, Name: SpringStep
@@ -1591,9 +1571,86 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 			return table.concat(out), count
 		end
 
+		-- Typische Decompiler-Schreibweise in normale umschreiben, nur im Code, nie in Strings oder Kommentaren:
+		-- ; am Zeilenende (auch end;), (1 / 0) wird math.huge, Typen : table, : any und self: … weg, local x = nil wird local x.
+		-- Gibt neuen Code und Zahl der Änderungen.
+		local function tidySource(src)
+			if src:find("[\1\2\3]") then return src, 0 end
+			-- Strings als \1n\2 und Kommentare als \3n\2 maskieren, damit die Muster unten nur Code sehen.
+			local parts, saved = {}, {}
+			for _, t in lex(src) do
+				if t[1] == "s" or t[1] == "c" then
+					table.insert(saved, t[2])
+					table.insert(parts, (t[1] == "s" and "\1" or "\3") .. #saved .. "\2")
+				else
+					table.insert(parts, t[2])
+				end
+			end
+			local code, total = table.concat(parts), 0
+			-- ; nicht direkt in { } (dort trennt es Einträge), wohl aber in einer Funktion darin. Nur am Zeilenende
+			-- und nie vor einer Zeile mit "(", sonst würde aus "a = b;\n(f)()" der Aufruf b(f)().
+			-- if als Ausdruck (x = if a then 1 else 2) hat kein end und zählt nicht als Block. Rest fängt das Sicherheitsnetz.
+			local out, stack, i, len, last = {}, {}, 1, #code, ""
+			local EXPR_BEFORE = { ["return"] = true, ["and"] = true, ["or"] = true, ["not"] = true }
+			while i <= len do
+				local c = code:sub(i, i)
+				local word = c:match("[%a_]") and code:match("^[%a_][%w_]*", i)
+				if word then
+					local isExprIf = word == "if" and (EXPR_BEFORE[last] or last:match("^[=%(,{%[%+%-%*/%%%^<>~%.]$") ~= nil)
+					if word == "function" or word == "do" or word == "repeat" or (word == "if" and not isExprIf) then
+						table.insert(stack, "b")
+					elseif (word == "end" or word == "until") and stack[#stack] == "b" then
+						table.remove(stack)
+					end
+					out[#out + 1] = word
+					i += #word
+					last = word
+				else
+					if not c:match("%s") then last = c end
+					if c == "{" then
+						table.insert(stack, "{")
+					elseif c == "}" then
+						while #stack > 0 and table.remove(stack) ~= "{" do end
+					end
+					local drop = false
+					if c == ";" and stack[#stack] ~= "{" then
+						local nextChar = code:match("^[ \t]*(.?)", i + 1)
+						if nextChar == "\n" or nextChar == "\r" or nextChar == "" then
+							drop = code:match("^%s*(.?)", i + 1) ~= "("
+						end
+					end
+					if drop then total += 1 else out[#out + 1] = c end
+					i += 1
+				end
+			end
+			code = table.concat(out)
+			-- (1 / 0) nur, wenn die Klammer eine Gruppe ist und kein Aufruf wie f(1 / 0).
+			code = code:gsub("()%((%-?)1 / 0%)", function(pos, minus)
+				local prev = code:sub(math.max(1, pos - 40), pos - 1):match("(%S*)%s*$")
+				local word = prev:match("[%w_]+$")
+				local last = prev:sub(-1)
+				if (word and not KEYWORDS[word]) or last == ")" or last == "]" or last == "\2" then return nil end
+				total += 1
+				return minus .. "math.huge"
+			end)
+			for _, ty in { "table", "any" } do
+				local n
+				code, n = code:gsub("([%w_%)]): " .. ty .. "%??%f[^%w_%?]", "%1")
+				total += n
+			end
+			local n
+			-- self: number ist geraten und falsch, self braucht keinen Typ.
+			code, n = code:gsub("%f[%w_](self): [%w_]+%??%f[^%w_%?]", "%1")
+			total += n
+			code, n = code:gsub("(local [%a_][%w_]*) = nil([ \t]*;?[ \t]*\n)", "%1%2")
+			total += n
+			code = code:gsub("[\1\3](%d+)\2", function(k) return saved[tonumber(k)] end)
+			return code, total
+		end
+
 		local function renameScripts()
-			local list, sel = {}, Selection:Get()
-			local roots = #sel > 0 and sel or { game }
+			local list = {}
+			local roots = { game }
 			for _, root in roots do
 				local ok, all = pcall(function()
 					local d = root == game and {} or root:GetDescendants()
@@ -1611,57 +1668,69 @@ do -- eigener Block: hält die Zahl der Top-Level-Variablen unter Luaus Grenze v
 					if obj:IsA("LuaSourceContainer") then table.insert(list, obj) end
 				end
 			end
-			local r = { scripts = 0, names = 0, skipped = 0, seen = #list }
+			local r = { scripts = 0, names = 0, fixes = 0, skipped = 0, seen = #list }
 			for i, s in list do
 				if i % 10 == 0 then
-					renameBtn.Text = ("Benenne um %d%% (%d/%d) …"):format(math.floor(i / #list * 100), i, #list)
+					creditsBtn.Text = ("Code %d%% (%d/%d) …"):format(math.floor(i / #list * 100), i, #list)
 					task.wait()
 				end
 				pcall(function()
 					local src = s.Source
 					local renamed, count = renameSource(src, s.Name)
-					if count == 0 then return end
+					local tidied, fixes = tidySource(renamed)
+					if count + fixes == 0 then return end
 					-- Sicherheitsnetz wie bei Credits: kompilierte der Code vorher und danach nicht mehr, bleibt er.
+					-- Scheitert erst das Umschreiben, bleibt wenigstens das Umbenennen.
 					local okBefore, before = pcall(loadstring, src)
-					local okAfter, after = pcall(loadstring, renamed)
-					if okBefore and before and not (okAfter and after) then
-						r.skipped += 1
-						return
+					local function compiles(code) local ok, f = pcall(loadstring, code) return ok and f ~= nil end
+					if okBefore and before and not compiles(tidied) then
+						tidied, fixes = renamed, 0
+						if count == 0 or not compiles(renamed) then
+							r.skipped += 1
+							return
+						end
 					end
-					game:GetService("ScriptEditorService"):UpdateSourceAsync(s, function() return renamed end)
+					game:GetService("ScriptEditorService"):UpdateSourceAsync(s, function() return tidied end)
 					r.scripts += 1
+					r.fixes += fixes
 					r.names += count
 				end)
 			end
 			return r
 		end
 
+		-- Eine Taste für alles: erst Credits (ganze Place), dann Variablennamen und Decompiler-Schreibweise.
+		local BTN_TEXT = "Decompiler-Spuren entfernen"
 		local confirmUntil = 0
-		renameBtn.Activated:Connect(function()
+		creditsBtn.Activated:Connect(function()
 			if RunService:IsRunning() then
-				renameLabel.TextColor3, renameLabel.Text = BAD, "Erst den Play-Test beenden."
+				creditsLabel.TextColor3, creditsLabel.Text = BAD, "Erst den Play-Test beenden."
 				return
 			end
-			if not renameBtn.Active then return end
+			if not creditsBtn.Active then return end
 			if os.clock() > confirmUntil then
 				confirmUntil = os.clock() + 5
-				local sel = #Selection:Get() > 0
-				renameBtn.Text = sel and "Sicher? Nur Auswahl, nochmal" or "Sicher? Ganze Place, nochmal"
-				task.delay(5, function() if renameBtn.Active then renameBtn.Text = "Variablennamen aufräumen" end end)
+				creditsBtn.Text = "Sicher? Ganze Place, nochmal klicken"
+				task.delay(5, function() if creditsBtn.Active then creditsBtn.Text = BTN_TEXT end end)
 				return
 			end
 			confirmUntil = 0
-			renameBtn.Active = false
-			local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: Variablennamen aufräumen")
+			creditsBtn.Active, creditsBtn.Text = false, "Credits …"
+			local rec = ChangeHistoryService:TryBeginRecording("Asset Downloader: " .. BTN_TEXT)
+			local okCredits, c = pcall(cleanPlace)
 			local ok, r = pcall(renameScripts)
 			if rec then ChangeHistoryService:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
-			renameBtn.Active, renameBtn.Text = true, "Variablennamen aufräumen"
-			if ok then
-				renameLabel.TextColor3 = OK
-				renameLabel.Text = ("%d Variablen in %d von %d Scripts umbenannt.%s Strg+Z macht es rückgängig.")
-					:format(r.names, r.scripts, r.seen, r.skipped > 0 and (" %d Scripts nicht angefasst, sie wären sonst kaputt gegangen."):format(r.skipped) or "")
+			creditsBtn.Active, creditsBtn.Text = true, BTN_TEXT
+			if not okCredits then
+				creditsLabel.TextColor3, creditsLabel.Text = BAD, "Fehler bei Credits: " .. tostring(c)
+			elseif not ok then
+				creditsLabel.TextColor3, creditsLabel.Text = BAD, "Fehler bei Variablen: " .. tostring(r)
 			else
-				renameLabel.TextColor3, renameLabel.Text = BAD, "Fehler: " .. tostring(r)
+				local skipped = c.skipped + r.skipped
+				creditsLabel.TextColor3 = OK
+				creditsLabel.Text = ("Fertig. %d Credits-Kommentare, %d Links, %d Credit-Sätze weg, %d Objekte geändert, %d gelöscht. %d Variablen umbenannt und %d Decompiler-Stellen umgeschrieben in %d von %d Scripts.%s Strg+Z macht alles rückgängig.")
+					:format(c.comments, c.links, c.credits, c.objects, c.deleted, r.names, r.fixes, r.scripts, r.seen,
+						skipped > 0 and (" %d Scripts nicht angefasst, sie wären sonst kaputt gegangen."):format(skipped) or "")
 			end
 		end)
 	end
